@@ -1,7 +1,11 @@
-"""Core business logic modules - Preserved from AI_Contract_V2.ipynb"""
+"""Core business logic package"""
 
 from .ai_analyzer import TTADocumentAnalyzer
 from .data_processor import DataPreprocessor
 from .reconciliation import TTAReconciliationSystem
 
-__all__ = ['TTADocumentAnalyzer', 'DataPreprocessor', 'TTAReconciliationSystem']
+__all__ = [
+    'TTADocumentAnalyzer',
+    'DataPreprocessor',
+    'TTAReconciliationSystem'
+]
