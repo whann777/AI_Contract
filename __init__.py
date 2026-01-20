@@ -1,7 +1,6 @@
-"""Core business logic modules - Preserved from AI_Contract_V2.ipynb"""
+"""Configuration package for Contract Audit System."""
 
-from .ai_analyzer import TTADocumentAnalyzer
-from .data_processor import DataPreprocessor
-from .reconciliation import TTAReconciliationSystem
+from .settings import *
+from .categories import ALLOWANCE_CATEGORIES
 
-__all__ = ['TTADocumentAnalyzer', 'DataPreprocessor', 'TTAReconciliationSystem']
+__all__ = ['ALLOWANCE_CATEGORIES', 'BASE_DIR', 'DATA_DIR', 'DIRECTORIES', 'GEMINI_CONFIG']
