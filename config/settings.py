@@ -10,7 +10,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Base directories
-BASE_DIR = Path(__file__).parent.parent
+BASE_DIR = if os.path.exists('/mount/src'):
+    BASE_DIR = Path('/mount/src/ai_contract')
+else:
+    BASE_DIR = Path(__file__).parent.parent
+
 DATA_DIR = BASE_DIR / 'data'
 
 # Data directories
