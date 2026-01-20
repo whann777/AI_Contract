@@ -1,6 +1,5 @@
-"""Configuration package for Contract Audit System."""
+"""Configuration package"""
 
-from .settings import *
-from .categories import ALLOWANCE_CATEGORIES
+from .categories import ALLOWANCE_CATEGORIES, CATEGORY_KEYWORDS
 
-__all__ = ['ALLOWANCE_CATEGORIES', 'BASE_DIR', 'DATA_DIR', 'DIRECTORIES', 'GEMINI_CONFIG']
+__all__ = ['ALLOWANCE_CATEGORIES', 'CATEGORY_KEYWORDS']
