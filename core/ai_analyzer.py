@@ -129,6 +129,8 @@ class TTADocumentAnalyzer:
           - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
             ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
             
+          - **ห้ามใส่ค่า null/None:**
+            ถ้าหาไม่เจอ Division หรือ Department → ให้ใส่ "00" แทน
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
@@ -236,9 +238,10 @@ class TTADocumentAnalyzer:
             print(f"\n❌ CRITICAL ERROR ในขั้นตอน Upload: {e}")
             return {"error": str(e)}
 
-        # 2. Generation Section (with JSON Repair)
+        # 2. Generation Section (with JSON Schema)
         print("\nStep 2: Sending Request to Gemini...")
         try:
+            # ใช้ JSON schema mode เพื่อบังคับให้ตอบ JSON ถูกต้อง
             generation_config = {
                 "temperature": 0.0,
                 "top_p": 0.95,
@@ -255,67 +258,95 @@ class TTADocumentAnalyzer:
             # --- JSON Cleaning (ซ่อมแซมข้อความก่อน Load) ---
             raw_text = response.text.strip()
 
-            # ฟังก์ชันทำความสะอาด JSON
+            # ฟังก์ชันทำความสะอาด JSON (ปรับปรุงใหม่)
             def clean_json_response(text):
-                """ทำความสะอาด JSON response"""
+                """ทำความสะอาด JSON response อย่างละเอียด"""
+                import re
+                
                 # 1. ลบ Markdown code blocks
                 if text.startswith("```"):
                     text = re.sub(r'^```json\s*|^```\s*|```$', '', text, flags=re.MULTILINE)
                 
-                # 2. ลบ trailing commas
-                text = re.sub(r',\s*([\]}])', r'\1', text)
+                # 2. ลบ trailing commas ทั้งหมด
+                text = re.sub(r',(\s*[\]}])', r'\1', text)
                 
-                # 3. แก้ double quotes ใน description
-                def fix_inner_quotes(match):
-                    key = match.group(1)
-                    value = match.group(2)
-                    # แปลง " ภายใน value เป็น '
-                    value_fixed = value.replace('"', "'")
-                    return f'"{key}": "{value_fixed}"'
+                # 3. ลบ comments
+                text = re.sub(r'//.*?\n|/\*.*?\*/', '', text, flags=re.DOTALL)
                 
-                # แก้ quotes ใน string fields
-                text = re.sub(
-                    r'"(description|category_name|payment_terms|Division_name|Department_name)":\s*"([^"]*(?:"[^"]*)*)"',
-                    fix_inner_quotes,
-                    text
-                )
+                # 4. แก้ single quotes เป็น double quotes (ถ้ามี)
+                # แต่ต้องระวังไม่ให้แก้ใน string values
                 
-                # 4. ลบ control characters
+                # 5. ลบ control characters
                 text = re.sub(r'[\x00-\x1F\x7F]', '', text)
+                
+                # 6. ลบช่องว่างเกินที่ไม่จำเป็น
+                text = re.sub(r'\s+', ' ', text)
+                
+                # 7. แก้ไข newlines ใน strings
+                text = text.replace('\\n', ' ')
                 
                 return text.strip()
             
             raw_text = clean_json_response(raw_text)
-
+            
+            # แสดง raw text เพื่อ debug (แค่ส่วนต้น)
+            print(f"\n🔍 Raw JSON (first 200 chars): {raw_text[:200]}...")
+            
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
 
-            # --- Robust Parsing ---
+            # --- Robust Parsing with Multiple Attempts ---
+            result = None
+            
+            # Attempt 1: ลอง parse โดยตรง
             try:
                 result = json.loads(raw_text)
+                print(f"   ✅ Parse สำเร็จ (attempt 1)")
             except json.JSONDecodeError as je:
-                # ถ้า parse ไม่ได้ ลองแก้เพิ่ม
-                print(f"\n⚠️ JSON Parsing Warning: {je}")
-                print(f"   กำลังลองแก้อัตโนมัติ...")
+                print(f"\n⚠️ Attempt 1 Failed: {je}")
+                print(f"   Character at error: {raw_text[je.pos:je.pos+50] if je.pos < len(raw_text) else 'EOF'}")
                 
-                # ลองวิธีที่ 2: ลบ comments
+                # Attempt 2: ลองหา JSON object แรก
                 try:
-                    raw_text_no_comments = re.sub(r'//.*?\n|/\*.*?\*/', '', raw_text, flags=re.DOTALL)
-                    result = json.loads(raw_text_no_comments)
-                    print(f"   ✅ แก้สำเร็จ (ลบ comments)")
-                except:
-                    # บันทึก debug file
-                    vendor_hint = pdf_path.split('/')[-1].replace('.pdf', '')
-                    debug_file = f"debug_error_{vendor_hint}.txt"
-                    with open(debug_file, "w", encoding='utf-8') as f:
-                        f.write(f"=== ORIGINAL RESPONSE ===\n")
-                        f.write(response.text)
-                        f.write(f"\n\n=== CLEANED RESPONSE ===\n")
-                        f.write(raw_text)
-                        f.write(f"\n\n=== ERROR ===\n")
-                        f.write(str(je))
+                    import re
+                    # หา { ... } แรก
+                    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                    if match:
+                        json_str = match.group(0)
+                        result = json.loads(json_str)
+                        print(f"   ✅ Parse สำเร็จ (attempt 2 - extracted first JSON)")
+                    else:
+                        raise ValueError("No JSON object found")
+                except Exception as e2:
+                    print(f"   ⚠️ Attempt 2 Failed: {e2}")
                     
-                    print(f"   ❌ ยังแก้ไม่ได้ บันทึกไว้ที่: {debug_file}")
-                    raise je  # Re-raise เพื่อไปที่ except block ด้านล่าง
+                    # Attempt 3: ใช้ demjson (ถ้ามี)
+                    try:
+                        import demjson3
+                        result = demjson3.decode(raw_text)
+                        print(f"   ✅ Parse สำเร็จ (attempt 3 - demjson)")
+                    except:
+                        # Attempt 4: บันทึก debug file และ raise error
+                        vendor_hint = pdf_path.split('/')[-1].replace('.pdf', '')
+                        debug_file = f"debug_error_{vendor_hint}.txt"
+                        with open(debug_file, "w", encoding='utf-8') as f:
+                            f.write(f"=== ORIGINAL RESPONSE ===\n")
+                            f.write(response.text)
+                            f.write(f"\n\n=== CLEANED RESPONSE ===\n")
+                            f.write(raw_text)
+                            f.write(f"\n\n=== ERROR ===\n")
+                            f.write(str(je))
+                            f.write(f"\n\n=== CHARACTER AT ERROR POSITION ===\n")
+                            if je.pos < len(raw_text):
+                                start = max(0, je.pos - 100)
+                                end = min(len(raw_text), je.pos + 100)
+                                f.write(f"...{raw_text[start:end]}...")
+                        
+                        print(f"   ❌ ทุก attempts ล้มเหลว")
+                        print(f"   📝 บันทึกไว้ที่: {debug_file}")
+                        raise je
+            
+            if result is None:
+                return {"error": "Failed to parse JSON after all attempts"}
             
             # --- VALIDATION: ตรวจสอบ Division และ Department ---
             result = self._validate_and_fix_codes(result)
