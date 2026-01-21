@@ -1,12 +1,13 @@
 """
-Analyze Mode UI - Professional Version
-ออกแบบให้ Formal, มีรายละเอียด, และใช้งานง่าย
+Analyze Mode UI - Professional Version with 3-Sheet Export
 """
 
 import streamlit as st
 import os
 from pathlib import Path
 import time
+import pandas as pd
+from io import BytesIO
 
 from services.processing_service import ProcessingService
 from config.settings import DIRECTORIES
@@ -37,7 +38,7 @@ def show_analyze_mode():
 
 
 def show_system_status():
-    """แสดงสถานะระบบ - Formal Style"""
+    """แสดงสถานะระบบ"""
     
     st.markdown("### 📊 System Status")
     
@@ -77,7 +78,6 @@ def show_system_status():
     ap_files = list(ap_folder.glob('*.csv'))
     ar_files = list(ar_folder.glob('*.csv'))
     
-    # Table format
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -114,16 +114,14 @@ def show_system_status():
 
 
 def show_processing_controls():
-    """ส่วนควบคุมการประมวลผล - มี Slider"""
+    """ส่วนควบคุมการประมวลผล"""
     
     st.markdown("### ⚙️ Processing Configuration")
     
-    # Check API key
     if not st.session_state.get('api_key'):
         st.error("❌ Cannot proceed without API Key. Please check System Status above.")
         return
     
-    # Check files
     pdf_files = list(DIRECTORIES['agreements'].glob('*.pdf'))
     ap_files = list(DIRECTORIES['ap'].glob('*.csv'))
     ar_files = list(DIRECTORIES['ar'].glob('*.csv'))
@@ -132,7 +130,6 @@ def show_processing_controls():
         st.error("❌ Missing required data files. Please check Data Sources above.")
         return
     
-    # Configuration
     col1, col2 = st.columns(2)
     
     with col1:
@@ -166,7 +163,6 @@ def show_processing_controls():
     
     st.markdown("---")
     
-    # Processing Info
     st.info(f"""
     **Processing Plan:**
     - **{len(pdf_files)}** PDF files will be analyzed
@@ -174,7 +170,6 @@ def show_processing_controls():
     - Results will be reconciled with AP/AR data
     """)
     
-    # Run button
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("🚀 Start Processing", type="primary", use_container_width=True):
@@ -190,18 +185,16 @@ def show_processing_controls():
 
 
 def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, show_images, delay_seconds):
-    """รันการประมวลผล - Professional Progress Display"""
+    """รันการประมวลผล"""
     
     service = ProcessingService(api_key)
     
-    # Create processing container
     st.markdown("---")
     st.markdown("### 🔄 Processing Status")
     
     progress_container = st.container()
     
     with progress_container:
-        # Progress elements
         progress_bar = st.progress(0)
         
         col1, col2, col3 = st.columns(3)
@@ -213,7 +206,6 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
         
         start_time = time.time()
         
-        # PDF progress callback
         def update_pdf_progress(current, total, filename):
             progress = current / total * 0.7
             progress_bar.progress(progress)
@@ -226,7 +218,6 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             
             detail_box.info(f"📄 Analyzing: **{filename}**")
         
-        # Analysis progress callback
         def update_analysis_progress(stage, progress_value=0.5):
             progress = 0.7 + (progress_value * 0.3)
             progress_bar.progress(progress)
@@ -240,7 +231,6 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             detail_box.info(f"🔍 {stage}")
         
         try:
-            # Process PDFs
             status_text.info("Initializing...")
             detail_box.info("🔄 Starting PDF processing...")
             
@@ -251,7 +241,6 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
                 progress_callback=update_pdf_progress
             )
             
-            # Analysis
             detail_box.info("🔄 Starting reconciliation analysis...")
             
             results = service.run_full_analysis(
@@ -261,12 +250,10 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
                 progress_callback=update_analysis_progress
             )
             
-            # Save session
             progress_bar.progress(0.95)
             detail_box.info("💾 Saving results...")
             session_name = service.save_session()
             
-            # Complete
             progress_bar.progress(1.0)
             elapsed_total = int(time.time() - start_time)
             
@@ -274,7 +261,14 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             time_text.metric("Total Time", f"{elapsed_total}s")
             current_file.empty()
             
-            # Store results
+            # แปลง Status เป็นภาษาอังกฤษ
+            if results is not None and 'status' in results.columns:
+                results['status'] = results['status'].map({
+                    'ครบ': 'MATCH',
+                    'เกิน': 'OVER',
+                    'ขาด': 'UNDER'
+                }).fillna(results['status'])
+            
             st.session_state.processing_results = results
             st.session_state.processing_summary = service.get_processing_summary()
             st.session_state.session_name = session_name
@@ -286,7 +280,6 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
                 'failed_files': fail
             }
             
-            # Success summary
             detail_box.success(f"""
             ✅ **Processing Complete**
             
@@ -296,7 +289,7 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             - **Total Time:** {elapsed_total} seconds
             - **Session ID:** {session_name}
             
-            📊 Results are now available in the Results section below.
+            📊 Results are now available below.
             """)
             
             time.sleep(2)
@@ -310,8 +303,81 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
                 st.code(traceback.format_exc())
 
 
+def create_summary_sheet(results):
+    """สร้าง Sheet 1: Summary - สรุปรายการที่ได้จากเอกสาร"""
+    summary_data = []
+    
+    if 'tta_key' in results.columns:
+        # Group by TTA
+        for tta_key in results['tta_key'].unique():
+            tta_data = results[results['tta_key'] == tta_key]
+            
+            summary_data.append({
+                'TTA Key': tta_key,
+                'Vendor Code': tta_data['vendor_code'].iloc[0] if 'vendor_code' in tta_data.columns else '',
+                'Vendor Name': tta_data['vendor_name'].iloc[0] if 'vendor_name' in tta_data.columns else '',
+                'Total Categories': len(tta_data),
+                'Total Should Collect': tta_data['should_collect'].sum() if 'should_collect' in tta_data.columns else 0,
+                'Total Actually Collected': tta_data['actually_collected'].sum() if 'actually_collected' in tta_data.columns else 0,
+                'Total Difference': tta_data['difference'].sum() if 'difference' in tta_data.columns else 0
+            })
+    
+    return pd.DataFrame(summary_data)
+
+
+def create_vendor_summary_sheet(results):
+    """สร้าง Sheet 3: Vendor Summary - สรุปภาพรวมแต่ละ Vendor"""
+    vendor_summary = []
+    
+    if 'vendor_code' in results.columns:
+        for vendor in results['vendor_code'].unique():
+            vendor_data = results[results['vendor_code'] == vendor]
+            
+            should_collect = vendor_data['should_collect'].sum() if 'should_collect' in vendor_data.columns else 0
+            actually_collected = vendor_data['actually_collected'].sum() if 'actually_collected' in vendor_data.columns else 0
+            difference = vendor_data['difference'].sum() if 'difference' in vendor_data.columns else 0
+            
+            # นับสถานะ
+            status_counts = vendor_data['status'].value_counts().to_dict() if 'status' in vendor_data.columns else {}
+            
+            vendor_summary.append({
+                'Vendor Code': vendor,
+                'Vendor Name': vendor_data['vendor_name'].iloc[0] if 'vendor_name' in vendor_data.columns else '',
+                'Total Categories': len(vendor_data),
+                'Should Collect': should_collect,
+                'Actually Collected': actually_collected,
+                'Difference': difference,
+                'MATCH Count': status_counts.get('MATCH', 0),
+                'OVER Count': status_counts.get('OVER', 0),
+                'UNDER Count': status_counts.get('UNDER', 0),
+                'Overall Status': 'MATCH' if difference == 0 else ('OVER' if difference > 0 else 'UNDER')
+            })
+    
+    return pd.DataFrame(vendor_summary)
+
+
+def export_to_excel_3sheets(results):
+    """Export Excel 3 sheets"""
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Sheet 1: TTA Summary
+        summary_df = create_summary_sheet(results)
+        summary_df.to_excel(writer, sheet_name='TTA Summary', index=False)
+        
+        # Sheet 2: Detailed Results
+        results.to_excel(writer, sheet_name='Detailed Results', index=False)
+        
+        # Sheet 3: Vendor Summary
+        vendor_summary_df = create_vendor_summary_sheet(results)
+        vendor_summary_df.to_excel(writer, sheet_name='Vendor Summary', index=False)
+    
+    output.seek(0)
+    return output
+
+
 def show_results_section():
-    """แสดงผลลัพธ์ - Professional & Detailed"""
+    """แสดงผลลัพธ์"""
     
     st.markdown("---")
     st.markdown("### 📊 Analysis Results")
@@ -323,115 +389,152 @@ def show_results_section():
     results = st.session_state.processing_results
     stats = st.session_state.get('processing_stats', {})
     
-    # Summary Header - มีข้อมูลที่สำคัญ
+    # Summary Header
     st.markdown("#### 📈 Processing Summary")
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
-    # แสดงเฉพาะที่มีความหมาย
     col1.metric(
         "📄 Processed Files",
         stats.get('processed_files', 0),
         help="Number of PDF files successfully processed"
     )
     
-    # แสดง Failed เฉพาะเมื่อมี
     if stats.get('failed_files', 0) > 0:
         col2.metric(
             "❌ Failed",
             stats.get('failed_files', 0),
             delta=f"-{stats.get('failed_files', 0)}",
-            delta_color="inverse",
-            help="Files that failed processing"
+            delta_color="inverse"
         )
     else:
         col2.metric(
             "✅ Success Rate",
-            "100%",
-            help="All files processed successfully"
+            "100%"
         )
     
     col3.metric(
         "📊 Total Records",
-        len(results),
-        help="Total allowance records extracted"
+        len(results)
     )
     
     if 'vendor_code' in results.columns:
         col4.metric(
             "🏢 Unique Vendors",
-            results['vendor_code'].nunique(),
-            help="Number of distinct vendors"
+            results['vendor_code'].nunique()
         )
     
     col5.metric(
         "⏱️ Processing Time",
-        f"{stats.get('total_time', 0)}s",
-        help="Total time taken"
+        f"{stats.get('total_time', 0)}s"
     )
     
     st.markdown("---")
     
-    # Data Preview & Analysis
-    st.markdown("#### 🔍 Detailed Results")
+    # Tabs for 3 sheets
+    tab1, tab2, tab3 = st.tabs(["📋 TTA Summary", "📊 Detailed Results", "🏢 Vendor Summary"])
     
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if 'vendor_code' in results.columns:
-            vendors = ['All Vendors'] + sorted(results['vendor_code'].unique().tolist())
-            selected_vendor = st.selectbox("Filter by Vendor:", vendors, key="vendor_filter")
+    with tab1:
+        st.markdown("#### 📋 TTA Summary")
+        summary_df = create_summary_sheet(results)
+        
+        if len(summary_df) > 0:
+            st.dataframe(summary_df, use_container_width=True, hide_index=True, height=400)
         else:
-            selected_vendor = 'All Vendors'
+            st.info("No summary data available")
     
-    with col2:
-        if 'status' in results.columns:
-            statuses = ['All Status'] + sorted(results['status'].unique().tolist())
-            selected_status = st.selectbox("Filter by Status:", statuses, key="status_filter")
+    with tab2:
+        st.markdown("#### 📊 Detailed Results")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if 'vendor_code' in results.columns:
+                vendors = ['All Vendors'] + sorted(results['vendor_code'].unique().tolist())
+                selected_vendor = st.selectbox("Filter by Vendor:", vendors, key="vendor_filter")
+            else:
+                selected_vendor = 'All Vendors'
+        
+        with col2:
+            if 'status' in results.columns:
+                statuses = ['All Status'] + sorted(results['status'].unique().tolist())
+                selected_status = st.selectbox("Filter by Status:", statuses, key="status_filter")
+            else:
+                selected_status = 'All Status'
+        
+        with col3:
+            if 'category_code' in results.columns:
+                categories = ['All Categories'] + sorted(results['category_code'].unique().tolist())
+                selected_category = st.selectbox("Filter by Category:", categories, key="category_filter")
+            else:
+                selected_category = 'All Categories'
+        
+        # Apply filters
+        filtered_results = results.copy()
+        
+        if selected_vendor != 'All Vendors':
+            filtered_results = filtered_results[filtered_results['vendor_code'] == selected_vendor]
+        
+        if selected_status != 'All Status':
+            filtered_results = filtered_results[filtered_results['status'] == selected_status]
+        
+        if selected_category != 'All Categories':
+            filtered_results = filtered_results[filtered_results['category_code'] == selected_category]
+        
+        st.caption(f"Showing **{len(filtered_results)}** of **{len(results)}** records")
+        
+        # Color-code status
+        def highlight_status(row):
+            if 'status' not in row.index:
+                return [''] * len(row)
+            
+            status = row['status']
+            if status == 'MATCH':
+                return ['background-color: #FFD700'] * len(row)  # Yellow
+            elif status == 'OVER':
+                return ['background-color: #FF6B6B'] * len(row)  # Red
+            elif status == 'UNDER':
+                return ['background-color: #4ECDC4'] * len(row)  # Green/Teal
+            return [''] * len(row)
+        
+        styled_df = filtered_results.style.apply(highlight_status, axis=1)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+    
+    with tab3:
+        st.markdown("#### 🏢 Vendor Summary")
+        vendor_summary_df = create_vendor_summary_sheet(results)
+        
+        if len(vendor_summary_df) > 0:
+            
+            def highlight_vendor_status(row):
+                if 'Overall Status' not in row.index:
+                    return [''] * len(row)
+                
+                status = row['Overall Status']
+                if status == 'MATCH':
+                    return ['background-color: #FFD700'] * len(row)
+                elif status == 'OVER':
+                    return ['background-color: #FF6B6B'] * len(row)
+                elif status == 'UNDER':
+                    return ['background-color: #4ECDC4'] * len(row)
+                return [''] * len(row)
+            
+            styled_vendor_df = vendor_summary_df.style.apply(highlight_vendor_status, axis=1)
+            st.dataframe(styled_vendor_df, use_container_width=True, hide_index=True, height=400)
         else:
-            selected_status = 'All Status'
+            st.info("No vendor summary available")
     
-    with col3:
-        if 'category_code' in results.columns:
-            categories = ['All Categories'] + sorted(results['category_code'].unique().tolist())
-            selected_category = st.selectbox("Filter by Category:", categories, key="category_filter")
-        else:
-            selected_category = 'All Categories'
-    
-    # Apply filters
-    filtered_results = results.copy()
-    
-    if selected_vendor != 'All Vendors':
-        filtered_results = filtered_results[filtered_results['vendor_code'] == selected_vendor]
-    
-    if selected_status != 'All Status':
-        filtered_results = filtered_results[filtered_results['status'] == selected_status]
-    
-    if selected_category != 'All Categories':
-        filtered_results = filtered_results[filtered_results['category_code'] == selected_category]
-    
-    # Display filtered count
-    st.caption(f"Showing **{len(filtered_results)}** of **{len(results)}** records")
-    
-    # Data table
-    st.dataframe(
-        filtered_results,
-        use_container_width=True,
-        hide_index=True,
-        height=500
-    )
-    
-    # Actions
+    # Export Options
     st.markdown("---")
     st.markdown("#### 💾 Export Options")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        csv = filtered_results.to_csv(index=False).encode('utf-8-sig')
+        csv = results.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 Download as CSV",
+            label="📥 Download CSV (Details Only)",
             data=csv,
             file_name=f"analysis_results_{st.session_state.get('session_name', 'export')}.csv",
             mime="text/csv",
@@ -439,15 +542,13 @@ def show_results_section():
         )
     
     with col2:
-        excel_buffer = filtered_results.to_excel(index=False, engine='openpyxl')
+        excel_buffer = export_to_excel_3sheets(results)
         st.download_button(
-            label="📊 Download as Excel",
+            label="📊 Download Excel (3 Sheets)",
             data=excel_buffer,
             file_name=f"analysis_results_{st.session_state.get('session_name', 'export')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            disabled=True,
-            help="Excel export coming soon"
+            use_container_width=True
         )
     
     with col3:
