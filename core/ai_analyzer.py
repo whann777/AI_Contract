@@ -127,8 +127,10 @@ class TTADocumentAnalyzer:
             4. ถ้าไม่แน่ใจ → Division มักอยู่ในส่วน Header หรือ ด้านบนสุด
             
           - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
-            ให้เลือก Department มา 1 ตัว   
-
+            ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
+            
+          - **ห้ามใส่ค่า null/None:**
+            ถ้าหาไม่เจอ Division หรือ Department → ให้ใส่ "00" แทน
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
@@ -159,34 +161,33 @@ class TTADocumentAnalyzer:
         - ไม่ต้องสนใจส่วนที่เป็นลายมือหรือสิ่งที่เป็นคนเขียน
         - สรุปเฉพาะหัวข้อที่มี Rate หรือ Fix Amount
         - บางไฟล์อาจจะมีเอกสารมากกว่า 2 หน้า ให้อ่านและสรุปข้อมูลเฉพาะ หน้า 1 และ 2 เท่านั้น หน้าอื่นไม่ต้องสนใจ
-
-        **กฎ JSON Format (สำคัญที่สุด):**
-        - ห้ามใช้เครื่องหมาย " (double quotes) ซ้อนข้างในข้อความเด็ดขาด ให้ใช้ ' (single quote) แทน
+        
+        **กฎ JSON Format (สำคัญมาก!):**
         - ใช้ double quotes สำหรับ keys และ string values เท่านั้น
+        - ถ้ามี double quote ในข้อความ ให้แปลงเป็น single quote แทน
         - ห้ามใส่ comma หลังรายการสุดท้ายใน array หรือ object
         - ห้ามใส่ comments
         - ห้ามใช้ special characters ที่ทำให้ JSON ผิด
 
-        
 
         Response ในรูปแบบ JSON เท่านั้น:
-      {{
+      {{{{
         "vendor_code": "รหัสผู้ขาย 7 หลัก",
         "Division_code": "รหัสแผนก 2 หลัก (01-09)",
         "Division_name": "ชื่อแผนก",
         "Department_code": "รหัสฝ่าย 2 หลัก (10-99)",
         "Department_name": "ชื่อฝ่าย",
         "allowances": [
-          {{
+          {{{{
             "category_code": "ARB",
             "category_name": "Unconditional Rebate",
             "rate_percent": 5.0,
             "fix_amount": null,
             "description": "รายละเอียดเงื่อนไข",
             "payment_terms": "monthly"
-          }}
+          }}}}
         ]
-      }}
+      }}}}
       """
 
         return prompt
