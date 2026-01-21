@@ -163,11 +163,14 @@ class TTADocumentAnalyzer:
         - บางไฟล์อาจจะมีเอกสารมากกว่า 2 หน้า ให้อ่านและสรุปข้อมูลเฉพาะ หน้า 1 และ 2 เท่านั้น หน้าอื่นไม่ต้องสนใจ
         
         **กฎ JSON Format (สำคัญมาก!):**
+        - **ใช้ภาษาอังกฤษใน JSON เท่านั้น** - ห้ามใช้ภาษาไทย ห้ามใช้ตัวอักษรพิเศษ
+        - Description, category_name, payment_terms ต้องเป็นภาษาอังกฤษทั้งหมด
         - ใช้ double quotes สำหรับ keys และ string values เท่านั้น
         - ถ้ามี double quote ในข้อความ ให้แปลงเป็น single quote แทน
         - ห้ามใส่ comma หลังรายการสุดท้ายใน array หรือ object
         - ห้ามใส่ comments
         - ห้ามใช้ special characters ที่ทำให้ JSON ผิด
+        - ห้ามใช้ newlines (\n) ใน string values
 
 
         Response ในรูปแบบ JSON เท่านั้น:
@@ -278,34 +281,56 @@ class TTADocumentAnalyzer:
             # 5. ลบ control characters
             raw_text = re.sub(r'[\x00-\x1F\x7F]', '', raw_text)
             
-            # 6. แก้ไข quotes ซ้อนใน description
-            # หา "description": "..." และแทนที่ quotes ภายในด้วย single quotes
-            def fix_quotes(match):
-                full_match = match.group(0)
-                # หาตำแหน่งของ value
-                colon_pos = full_match.find(':')
-                if colon_pos == -1:
-                    return full_match
+            # 6. แก้ไข quotes ซ้อนใน description และ escape ภาษาไทยที่ทำให้พัง
+            # ใช้วิธีที่ปลอดภัยกว่า: หา string values แล้วแก้ทีละตัว
+            def safe_fix_string_value(text):
+                """แก้ string values ให้ปลอดภัย"""
+                result = []
+                i = 0
+                in_string = False
+                escape_next = False
                 
-                key_part = full_match[:colon_pos+1]
-                value_part = full_match[colon_pos+1:].strip()
+                while i < len(text):
+                    char = text[i]
+                    
+                    if escape_next:
+                        result.append(char)
+                        escape_next = False
+                        i += 1
+                        continue
+                    
+                    if char == '\\':
+                        escape_next = True
+                        result.append(char)
+                        i += 1
+                        continue
+                    
+                    if char == '"':
+                        if not in_string:
+                            # เริ่ม string
+                            in_string = True
+                            result.append(char)
+                        else:
+                            # จบ string - แต่ต้องเช็คว่าจริงๆ หรือเปล่า
+                            # ดูว่าหลัง " เป็น : , } ] หรือไม่
+                            next_char = text[i+1] if i+1 < len(text) else ''
+                            if next_char in [',', '}', ']', ' ', '']:
+                                # จบ string จริง
+                                in_string = False
+                                result.append(char)
+                            else:
+                                # อาจเป็น quote ภายใน string - แปลงเป็น single quote
+                                result.append("'")
+                        i += 1
+                        continue
+                    
+                    result.append(char)
+                    i += 1
                 
-                if value_part.startswith('"') and value_part.endswith('"'):
-                    # เอา quotes ออก แก้ quotes ภายใน แล้วใส่กลับ
-                    inner = value_part[1:-1]
-                    inner = inner.replace('"', "'")
-                    value_part = f'"{inner}"'
-                
-                return key_part + ' ' + value_part
+                return ''.join(result)
             
-            # ใช้กับทุก field ที่อาจมี quotes ซ้อน
-            for field in ['description', 'category_name', 'payment_terms', 'Division_name', 'Department_name']:
-                pattern = f'"{field}"\\s*:\\s*"[^"]*"'
-                # ต้องใช้ finditer เพราะอาจมีหลายตัว
-                matches = list(re.finditer(pattern, raw_text))
-                for match in reversed(matches):  # ทำจากหลังไปหน้าเพื่อไม่ให้ตำแหน่งเปลี่ยน
-                    fixed = fix_quotes(match)
-                    raw_text = raw_text[:match.start()] + fixed + raw_text[match.end():]
+            # ใช้ safe fix
+            raw_text = safe_fix_string_value(raw_text)
             
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
             print(f"🔍 Cleaned JSON (first 200 chars): {raw_text[:200]}...")
