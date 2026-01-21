@@ -36,40 +36,35 @@ def show_auditor_mode():
 
 def load_session_selector():
     """
-    แสดงตัวเลือก session และโหลดข้อมูล
+    แสดงตัวเลือก session และโหลดข้อมูลจาก session_state
     
     Returns:
         bool: True ถ้าโหลดสำเร็จ
     """
     st.markdown("### 📂 เลือก Session")
     
-    results_folder = DIRECTORIES['results']
-    
-    # Find available sessions
-    metadata_files = list(results_folder.glob("*_metadata.json"))
-    
-    if not metadata_files:
+    # ตรวจสอบว่ามี saved_sessions ใน session_state หรือไม่
+    if 'saved_sessions' not in st.session_state or not st.session_state.saved_sessions:
         return False
     
+    sessions = st.session_state.saved_sessions
+    
     # Create session options
-    sessions = []
-    for metadata_file in metadata_files:
-        with open(metadata_file, 'r', encoding='utf-8') as f:
-            metadata = json.load(f)
-            sessions.append({
-                'name': metadata.get('session_name', 'Unknown'),
-                'timestamp': metadata.get('timestamp', ''),
-                'file': str(metadata_file),
-                'metadata': metadata
-            })
+    session_list = []
+    for name, data in sessions.items():
+        session_list.append({
+            'name': name,
+            'timestamp': data.get('timestamp', ''),
+            'data': data
+        })
     
     # Sort by timestamp (newest first)
-    sessions.sort(key=lambda x: x['timestamp'], reverse=True)
+    session_list.sort(key=lambda x: x['timestamp'], reverse=True)
     
     # Session selector
     session_options = [
         f"{s['name']} ({s['timestamp'][:19] if s['timestamp'] else 'Unknown time'})"
-        for s in sessions
+        for s in session_list
     ]
     
     selected_idx = st.selectbox(
@@ -78,23 +73,29 @@ def load_session_selector():
         format_func=lambda i: session_options[i]
     )
     
-    selected_session = sessions[selected_idx]
+    # Load selected session
+    selected_session = session_list[selected_idx]
+    session_data = selected_session['data']
     
-    # Load results
-    metadata = selected_session['metadata']
-    session_name = selected_session['name']
+    # Store in session state for dashboard
+    st.session_state.current_session_data = session_data
+    st.session_state.dashboard_results = session_data.get('results')
     
-    # Try to load results
-    results_file = results_folder / f"{session_name}_results.parquet"
+    # แสดงข้อมูล session
+    col1, col2, col3 = st.columns(3)
     
-    if results_file.exists():
-        results_df = pd.read_parquet(results_file)
-        st.session_state.current_results = results_df
-        st.session_state.current_metadata = metadata
-        st.session_state.current_session_name = session_name
+    summary = session_data.get('summary', {})
+    col1.metric("ไฟล์ที่ประมวลผล", summary.get('total', 0))
+    col2.metric("สำเร็จ", summary.get('success', 0))
+    col3.metric("ล้มเหลว", summary.get('failed', 0))
+    
+    # แสดงผลลัพธ์
+    results = session_data.get('results')
+    if results is not None and len(results) > 0:
+        st.success(f"✅ พบข้อมูล: {len(results)} รายการ")
         return True
     else:
-        st.error(f"❌ ไม่พบไฟล์ผลลัพธ์: {results_file}")
+        st.warning("⚠️ Session นี้ไม่มีข้อมูลผลลัพธ์")
         return False
 
 
@@ -111,21 +112,26 @@ def show_no_session_message():
 def show_dashboard():
     """แสดง Dashboard หลัก"""
     
-    results_df = st.session_state.current_results
-    metadata = st.session_state.current_metadata
+    # ใช้ข้อมูลจาก session_state
+    results_df = st.session_state.get('dashboard_results')
+    session_data = st.session_state.get('current_session_data', {})
+    
+    if results_df is None or len(results_df) == 0:
+        st.warning("⚠️ ไม่มีข้อมูลให้แสดง")
+        return
     
     # Session info
     with st.expander("ℹ️ ข้อมูล Session"):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown(f"**Session:** {st.session_state.current_session_name}")
-            st.markdown(f"**เวลา:** {metadata.get('timestamp', 'N/A')[:19]}")
+            st.markdown(f"**Session:** {session_data.get('session_name', 'N/A')}")
+            st.markdown(f"**เวลา:** {session_data.get('timestamp', 'N/A')[:19]}")
         
         with col2:
-            summary = metadata.get('summary', {})
-            st.markdown(f"**PDF ประมวลผล:** {summary.get('pdfs_processed', 0)}")
-            st.markdown(f"**จำนวนรายการ:** {summary.get('total_records', 0)}")
+            summary = session_data.get('summary', {})
+            st.markdown(f"**PDF ประมวลผล:** {summary.get('total', 0)}")
+            st.markdown(f"**จำนวนรายการ:** {len(results_df)}")
     
     st.markdown("---")
     
