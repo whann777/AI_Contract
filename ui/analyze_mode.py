@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 
 from services.processing_service import ProcessingService
-from config.settings import DIRECTORIES
+from config.settings import DIRECTORIES, GEMINI_API_KEY
 
 
 def show_analyze_mode():
@@ -100,9 +100,6 @@ def show_file_status_section():
 def show_processing_section():
     """ส่วนตั้งค่าและรันประมวลผล"""
     st.markdown("### ⚙️ ตั้งค่าและรันประมวลผล")
-    
-    # ดึง API Key จาก settings (Secret)
-    from config.settings import GEMINI_API_KEY
     
     # เก็บใน session_state
     if 'api_key' not in st.session_state:
