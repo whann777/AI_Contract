@@ -125,10 +125,9 @@ class TTADocumentAnalyzer:
             2. มองหา "Department Code" หรือ "DEPT" ในเอกสาร → เป็น 10-99
             3. ถ้าเจอตัวเลข 60, 70, 80 → น่าจะเป็น Department ไม่ใช่ Division
             4. ถ้าไม่แน่ใจ → Division มักอยู่ในส่วน Header หรือ ด้านบนสุด
-          - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:
-          ** ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
             
-
+          - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
+            ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
             
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
@@ -159,8 +158,19 @@ class TTADocumentAnalyzer:
         - อ่านข้อมูลจากตารางในเอกสารให้ละเอียดระวังเรื่องบรรทัดและคอลัมน์
         - ไม่ต้องสนใจส่วนที่เป็นลายมือหรือสิ่งที่เป็นคนเขียน
         - สรุปเฉพาะหัวข้อที่มี Rate หรือ Fix Amount
-        - ในช่อง description ห้ามใช้เครื่องหมาย double quote (") ให้ใช้ single quote (') แทน และห้ามใส่เครื่องหมาย comma (,) ปิดท้ายรายการสุดท้ายใน JSON object
         - บางไฟล์อาจจะมีเอกสารมากกว่า 2 หน้า ให้อ่านและสรุปข้อมูลเฉพาะ หน้า 1 และ 2 เท่านั้น หน้าอื่นไม่ต้องสนใจ
+        
+        **กฎ JSON Format (สำคัญมาก!):**
+        - ใช้ double quotes (") สำหรับ keys และ string values เท่านั้น
+        - ถ้ามี double quote ในข้อความ ให้แปลงเป็น single quote (') แทน
+        - ห้ามใส่ comma (,) หลังรายการสุดท้ายใน array หรือ object
+        - ห้ามใส่ comments (// หรือ /* */)
+        - ห้ามใช้ special characters ที่ทำให้ JSON ผิด
+        - ตัวอย่าง:
+          ✅ ถูก: "description": "Support for 'special' items"
+          ❌ ผิด: "description": "Support for "special" items"
+          ✅ ถูก: {"a": 1, "b": 2}
+          ❌ ผิด: {"a": 1, "b": 2,}
 
 
         Response ในรูปแบบ JSON เท่านั้น:
@@ -250,17 +260,67 @@ class TTADocumentAnalyzer:
             # --- JSON Cleaning (ซ่อมแซมข้อความก่อน Load) ---
             raw_text = response.text.strip()
 
-            # ลบ Markdown Tag ```json ... ``` ถ้าโมเดลเผลอใส่มา
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r'^```json\s*|```$', '', raw_text, flags=re.MULTILINE)
-
-            # ลบ Trailing Commas (เครื่องหมาย , ที่อยู่หน้า ] หรือ })
-            raw_text = re.sub(r',\s*([\]}])', r'\1', raw_text)
+            # ฟังก์ชันทำความสะอาด JSON
+            def clean_json_response(text):
+                """ทำความสะอาด JSON response"""
+                # 1. ลบ Markdown code blocks
+                if text.startswith("```"):
+                    text = re.sub(r'^```json\s*|^```\s*|```$', '', text, flags=re.MULTILINE)
+                
+                # 2. ลบ trailing commas
+                text = re.sub(r',\s*([\]}])', r'\1', text)
+                
+                # 3. แก้ double quotes ใน description
+                def fix_inner_quotes(match):
+                    key = match.group(1)
+                    value = match.group(2)
+                    # แปลง " ภายใน value เป็น '
+                    value_fixed = value.replace('"', "'")
+                    return f'"{key}": "{value_fixed}"'
+                
+                # แก้ quotes ใน string fields
+                text = re.sub(
+                    r'"(description|category_name|payment_terms|Division_name|Department_name)":\s*"([^"]*(?:"[^"]*)*)"',
+                    fix_inner_quotes,
+                    text
+                )
+                
+                # 4. ลบ control characters
+                text = re.sub(r'[\x00-\x1F\x7F]', '', text)
+                
+                return text.strip()
+            
+            raw_text = clean_json_response(raw_text)
 
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
 
             # --- Robust Parsing ---
-            result = json.loads(raw_text)
+            try:
+                result = json.loads(raw_text)
+            except json.JSONDecodeError as je:
+                # ถ้า parse ไม่ได้ ลองแก้เพิ่ม
+                print(f"\n⚠️ JSON Parsing Warning: {je}")
+                print(f"   กำลังลองแก้อัตโนมัติ...")
+                
+                # ลองวิธีที่ 2: ลบ comments
+                try:
+                    raw_text_no_comments = re.sub(r'//.*?\n|/\*.*?\*/', '', raw_text, flags=re.DOTALL)
+                    result = json.loads(raw_text_no_comments)
+                    print(f"   ✅ แก้สำเร็จ (ลบ comments)")
+                except:
+                    # บันทึก debug file
+                    vendor_hint = pdf_path.split('/')[-1].replace('.pdf', '')
+                    debug_file = f"debug_error_{vendor_hint}.txt"
+                    with open(debug_file, "w", encoding='utf-8') as f:
+                        f.write(f"=== ORIGINAL RESPONSE ===\n")
+                        f.write(response.text)
+                        f.write(f"\n\n=== CLEANED RESPONSE ===\n")
+                        f.write(raw_text)
+                        f.write(f"\n\n=== ERROR ===\n")
+                        f.write(str(je))
+                    
+                    print(f"   ❌ ยังแก้ไม่ได้ บันทึกไว้ที่: {debug_file}")
+                    raise je  # Re-raise เพื่อไปที่ except block ด้านล่าง
             
             # --- VALIDATION: ตรวจสอบ Division และ Department ---
             result = self._validate_and_fix_codes(result)
