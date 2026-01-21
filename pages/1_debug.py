@@ -106,10 +106,11 @@ st.markdown("## 📈 Step 4: ผลลัพธ์ที่แสดง")
 if 'processing_results' in st.session_state:
     results = st.session_state.processing_results
     
-    st.info(f"จำนวนรายการทั้งหมด: {len(results)} แถว")
-    
-    # ดูว่ามีกี่ vendor
-    if 'vendor_code' in results.columns:
+    if results is not None and len(results) > 0:
+        st.info(f"จำนวนรายการทั้งหมด: {len(results)} แถว")
+        
+        # ดูว่ามีกี่ vendor
+        if 'vendor_code' in results.columns:
         unique_vendors = results['vendor_code'].unique()
         st.success(f"✅ มี {len(unique_vendors)} vendors")
         
@@ -157,6 +158,9 @@ if 'processing_results' in st.session_state:
     # แสดงตาราง
     st.markdown("### 📋 ตารางผลลัพธ์:")
     st.dataframe(results, use_container_width=True)
+    else:
+        st.warning("⚠️ ผลลัพธ์เป็น None หรือว่างเปล่า")
+        st.info("💡 สาเหตุ: ไม่มี JSON ไฟล์ใดประมวลผลสำเร็จ")
 else:
     st.warning("⚠️ ยังไม่มีผลลัพธ์ในระบบ")
     st.info("กรุณารันประมวลผลก่อน")
@@ -172,7 +176,7 @@ if len(pdf_files) > len(json_files):
     st.markdown("**แนะนำ:** ลองรันใหม่อีกครั้ง หรือเพิ่ม delay ระหว่างไฟล์")
 elif 'processing_results' in st.session_state:
     results = st.session_state.processing_results
-    if 'vendor_code' in results.columns:
+    if results is not None and 'vendor_code' in results.columns:
         unique_vendors = len(results['vendor_code'].unique())
         if unique_vendors < len(json_files):
             st.error(f"❌ ปัญหา: มี JSON {len(json_files)} ไฟล์ แต่ผลลัพธ์มีแค่ {unique_vendors} vendors")
