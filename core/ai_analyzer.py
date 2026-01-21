@@ -281,56 +281,38 @@ class TTADocumentAnalyzer:
             # 5. ลบ control characters
             raw_text = re.sub(r'[\x00-\x1F\x7F]', '', raw_text)
             
-            # 6. แก้ไข quotes ซ้อนใน description และ escape ภาษาไทยที่ทำให้พัง
-            # ใช้วิธีที่ปลอดภัยกว่า: หา string values แล้วแก้ทีละตัว
-            def safe_fix_string_value(text):
-                """แก้ string values ให้ปลอดภัย"""
-                result = []
-                i = 0
-                in_string = False
-                escape_next = False
+            # 6. แก้ไข quotes ซ้อนใน description - ใช้วิธีที่ง่ายและ reliable กว่า
+            # แทนที่จะ parse character ให้ใช้ regex แบบ greedy + Unicode support
+            def fix_string_values(text):
+                """
+                แก้ quotes ซ้อนใน string values
+                หลักการ: หา string values ทั้งหมดแล้วแทนที่ quotes ภายในด้วย single quotes
+                """
+                def replace_inner_quotes(match):
+                    # match.group(0) = ทั้ง "key": "value"
+                    # match.group(1) = key name
+                    # match.group(2) = value
+                    key = match.group(1)
+                    value = match.group(2)
+                    
+                    # แทนที่ quotes ภายใน value ด้วย single quotes
+                    # แต่ต้องระวังไม่ให้แทนที่ escaped quotes
+                    value_fixed = value.replace('\\"', '___ESCAPED_QUOTE___')
+                    value_fixed = value_fixed.replace('"', "'")
+                    value_fixed = value_fixed.replace('___ESCAPED_QUOTE___', '\\"')
+                    
+                    return f'"{key}": "{value_fixed}"'
                 
-                while i < len(text):
-                    char = text[i]
-                    
-                    if escape_next:
-                        result.append(char)
-                        escape_next = False
-                        i += 1
-                        continue
-                    
-                    if char == '\\':
-                        escape_next = True
-                        result.append(char)
-                        i += 1
-                        continue
-                    
-                    if char == '"':
-                        if not in_string:
-                            # เริ่ม string
-                            in_string = True
-                            result.append(char)
-                        else:
-                            # จบ string - แต่ต้องเช็คว่าจริงๆ หรือเปล่า
-                            # ดูว่าหลัง " เป็น : , } ] หรือไม่
-                            next_char = text[i+1] if i+1 < len(text) else ''
-                            if next_char in [',', '}', ']', ' ', '']:
-                                # จบ string จริง
-                                in_string = False
-                                result.append(char)
-                            else:
-                                # อาจเป็น quote ภายใน string - แปลงเป็น single quote
-                                result.append("'")
-                        i += 1
-                        continue
-                    
-                    result.append(char)
-                    i += 1
+                # Pattern: "key_name": "value ที่อาจมี quotes และ Unicode"
+                # ใช้ [\s\S] แทน . เพื่อให้จับ newlines ได้ด้วย
+                # ใช้ non-greedy .*? เพื่อไม่ให้จับเกินไป
+                pattern = r'"([^"]+)":\s*"((?:[^"\\]|\\.)*)\"'
                 
-                return ''.join(result)
+                result = re.sub(pattern, replace_inner_quotes, text)
+                return result
             
-            # ใช้ safe fix
-            raw_text = safe_fix_string_value(raw_text)
+            # ใช้ fix ที่ปลอดภัยกว่า
+            raw_text = fix_string_values(raw_text)
             
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
             print(f"🔍 Cleaned JSON (first 200 chars): {raw_text[:200]}...")
