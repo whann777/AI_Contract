@@ -101,16 +101,26 @@ def show_processing_section():
     """ส่วนตั้งค่าและรันประมวลผล"""
     st.markdown("### ⚙️ ตั้งค่าและรันประมวลผล")
     
-    # API Key input
-    api_key = st.text_input(
-        "🔑 Gemini API Key",
-        value=st.session_state.api_key,
-        type='password',
-        help="ใส่ API Key สำหรับ Google Gemini"
-    )
+    # ดึง API Key จาก settings (Secret)
+    from config.settings import GEMINI_API_KEY
     
-    if api_key:
-        st.session_state.api_key = api_key
+    # เก็บใน session_state
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = GEMINI_API_KEY
+    
+    # แสดงสถานะ API Key
+    if st.session_state.api_key:
+        st.success("✅ Gemini API Key พร้อมใช้งาน (จาก Secrets)")
+    else:
+        st.error("❌ ไม่พบ Gemini API Key - กรุณาตั้งค่าใน Secrets")
+        st.info("""
+        💡 **วิธีตั้งค่า API Key:**
+        1. ไปที่ Streamlit Cloud → Settings
+        2. เลือก Secrets
+        3. เพิ่ม: `GEMINI_API_KEY = "your-api-key-here"`
+        4. Save & Reboot
+        """)
+        return
     
     # Processing options
     col1, col2 = st.columns(2)
@@ -130,11 +140,6 @@ def show_processing_section():
         )
     
     st.markdown("---")
-    
-    # Run button
-    if not st.session_state.api_key:
-        st.warning("⚠️ กรุณาใส่ Gemini API Key ก่อนรันประมวลผล")
-        return
     
     # Check if files exist
     pdf_files = list(DIRECTORIES['agreements'].glob('*.pdf'))
