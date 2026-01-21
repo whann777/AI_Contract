@@ -129,8 +129,7 @@ class TTADocumentAnalyzer:
           - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
             ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
             
-          - **ห้ามใส่ค่า null/None:**
-            ถ้าหาไม่เจอ Division หรือ Department → ให้ใส่ "00" แทน
+
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
