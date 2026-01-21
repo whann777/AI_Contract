@@ -127,10 +127,7 @@ class TTADocumentAnalyzer:
             4. ถ้าไม่แน่ใจ → Division มักอยู่ในส่วน Header หรือ ด้านบนสุด
             
           - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
-            ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
-            
-          - **ห้ามใส่ค่า null/None:**
-            ถ้าหาไม่เจอ Division หรือ Department → ให้ใส่ "00" แทน
+            ให้เลือก Department ให้ยิบมา 1 ตัว
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
