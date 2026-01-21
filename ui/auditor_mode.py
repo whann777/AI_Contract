@@ -43,8 +43,23 @@ def load_session_selector():
     """
     st.markdown("### 📂 เลือก Session")
     
+    # 🔍 DEBUG: แสดงข้อมูล session_state
+    st.write("🔍 Debug Information:")
+    st.write(f"- มี 'saved_sessions' ใน session_state? {('saved_sessions' in st.session_state)}")
+    
+    if 'saved_sessions' in st.session_state:
+        st.write(f"- จำนวน sessions: {len(st.session_state.saved_sessions)}")
+        st.write(f"- Session names: {list(st.session_state.saved_sessions.keys())}")
+    else:
+        st.write("- ไม่มี 'saved_sessions' เลย")
+    
+    st.write(f"- All session_state keys: {list(st.session_state.keys())}")
+    st.markdown("---")
+    
     # ตรวจสอบว่ามี saved_sessions ใน session_state หรือไม่
     if 'saved_sessions' not in st.session_state or not st.session_state.saved_sessions:
+        st.warning("⚠️ ไม่พบ session ใน memory")
+        st.info("💡 Tip: ต้องรันประมวลผลใน For Analyze mode ก่อน")
         return False
     
     sessions = st.session_state.saved_sessions
