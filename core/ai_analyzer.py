@@ -128,7 +128,9 @@ class TTADocumentAnalyzer:
             
           - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
             ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
-
+            
+          - **ห้ามใส่ค่า null/None:**
+            ถ้าหาไม่เจอ Division หรือ Department → ให้ใส่ "00" แทน
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
@@ -236,44 +238,15 @@ class TTADocumentAnalyzer:
             print(f"\n❌ CRITICAL ERROR ในขั้นตอน Upload: {e}")
             return {"error": str(e)}
 
-        # 2. Generation Section (with JSON Schema)
+        # 2. Generation Section (with Better JSON Cleaning)
         print("\nStep 2: Sending Request to Gemini...")
         try:
-            # กำหนด JSON Schema เพื่อบังคับ format
-            from google.generativeai import protos
-            
             generation_config = {
                 "temperature": 0.0,
                 "top_p": 0.95,
                 "top_k": 64,
                 "max_output_tokens": 8192,
                 "response_mime_type": "application/json",
-                "response_schema": {
-                    "type": "object",
-                    "properties": {
-                        "vendor_code": {"type": "string"},
-                        "Division_code": {"type": "string"},
-                        "Division_name": {"type": "string"},
-                        "Department_code": {"type": "string"},
-                        "Department_name": {"type": "string"},
-                        "allowances": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "category_code": {"type": "string"},
-                                    "category_name": {"type": "string"},
-                                    "rate_percent": {"type": ["number", "null"]},
-                                    "fix_amount": {"type": ["number", "null"]},
-                                    "description": {"type": "string"},
-                                    "payment_terms": {"type": "string"}
-                                },
-                                "required": ["category_code", "category_name", "description"]
-                            }
-                        }
-                    },
-                    "required": ["vendor_code", "Division_code", "allowances"]
-                }
             }
 
             response = self.model.generate_content(
@@ -281,23 +254,95 @@ class TTADocumentAnalyzer:
                 generation_config=generation_config
             )
 
-            # --- Parse JSON (ตอนนี้ควร valid 100%) ---
+            # --- Aggressive JSON Cleaning ---
             raw_text = response.text.strip()
             
-            print(f"\n🔍 Raw JSON (first 200 chars): {raw_text[:200]}...")
+            print(f"\n🔍 Raw JSON length: {len(raw_text)} chars")
+            
+            # ทำความสะอาด JSON อย่างละเอียด
+            # 1. ลบ markdown blocks
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r'^```json\s*|^```\s*|```$', '', raw_text, flags=re.MULTILINE)
+            
+            # 2. ลบ newlines ทั้งหมดจาก strings
+            # แทนที่ \n, \r, \t ด้วยช่องว่าง
+            raw_text = raw_text.replace('\\n', ' ').replace('\\r', ' ').replace('\\t', ' ')
+            raw_text = raw_text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+            
+            # 3. ลบช่องว่างเกิน
+            raw_text = re.sub(r'\s+', ' ', raw_text)
+            
+            # 4. ลบ trailing commas
+            raw_text = re.sub(r',\s*([}\]])', r'\1', raw_text)
+            
+            # 5. ลบ control characters
+            raw_text = re.sub(r'[\x00-\x1F\x7F]', '', raw_text)
+            
+            # 6. แก้ไข quotes ซ้อนใน description
+            # หา "description": "..." และแทนที่ quotes ภายในด้วย single quotes
+            def fix_quotes(match):
+                full_match = match.group(0)
+                # หาตำแหน่งของ value
+                colon_pos = full_match.find(':')
+                if colon_pos == -1:
+                    return full_match
+                
+                key_part = full_match[:colon_pos+1]
+                value_part = full_match[colon_pos+1:].strip()
+                
+                if value_part.startswith('"') and value_part.endswith('"'):
+                    # เอา quotes ออก แก้ quotes ภายใน แล้วใส่กลับ
+                    inner = value_part[1:-1]
+                    inner = inner.replace('"', "'")
+                    value_part = f'"{inner}"'
+                
+                return key_part + ' ' + value_part
+            
+            # ใช้กับทุก field ที่อาจมี quotes ซ้อน
+            for field in ['description', 'category_name', 'payment_terms', 'Division_name', 'Department_name']:
+                pattern = f'"{field}"\\s*:\\s*"[^"]*"'
+                # ต้องใช้ finditer เพราะอาจมีหลายตัว
+                matches = list(re.finditer(pattern, raw_text))
+                for match in reversed(matches):  # ทำจากหลังไปหน้าเพื่อไม่ให้ตำแหน่งเปลี่ยน
+                    fixed = fix_quotes(match)
+                    raw_text = raw_text[:match.start()] + fixed + raw_text[match.end():]
+            
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
+            print(f"🔍 Cleaned JSON (first 200 chars): {raw_text[:200]}...")
 
-            # Parse โดยตรง (schema รับประกันว่า valid)
+            # --- Parse JSON ---
             try:
                 result = json.loads(raw_text)
                 print(f"   ✅ Parse สำเร็จ")
             except json.JSONDecodeError as je:
-                # ถ้ายัง error ลอง clean
-                print(f"   ⚠️ Parse attempt 1 failed, cleaning...")
-                raw_text = raw_text.replace('\\n', ' ').replace('\n', ' ')
-                raw_text = re.sub(r'\s+', ' ', raw_text)
-                result = json.loads(raw_text)
-                print(f"   ✅ Parse สำเร็จ (after cleaning)")
+                print(f"\n   ⚠️ Parse failed at position {je.pos}")
+                print(f"   Error: {je.msg}")
+                
+                # แสดงบริบทรอบๆ error
+                if je.pos < len(raw_text):
+                    start = max(0, je.pos - 100)
+                    end = min(len(raw_text), je.pos + 100)
+                    print(f"   Context: ...{raw_text[start:je.pos]}[ERROR HERE]{raw_text[je.pos:end]}...")
+                
+                # บันทึก debug file
+                vendor_hint = pdf_path.split('/')[-1].replace('.pdf', '')
+                debug_file = f"debug_error_{vendor_hint}.txt"
+                with open(debug_file, "w", encoding='utf-8') as f:
+                    f.write(f"=== ORIGINAL RESPONSE ===\n")
+                    f.write(response.text)
+                    f.write(f"\n\n=== CLEANED RESPONSE ===\n")
+                    f.write(raw_text)
+                    f.write(f"\n\n=== ERROR ===\n")
+                    f.write(f"Position: {je.pos}\n")
+                    f.write(f"Message: {je.msg}\n")
+                    if je.pos < len(raw_text):
+                        f.write(f"\n=== CONTEXT ===\n")
+                        start = max(0, je.pos - 200)
+                        end = min(len(raw_text), je.pos + 200)
+                        f.write(raw_text[start:end])
+                
+                print(f"   📝 Debug file saved: {debug_file}")
+                raise je
             
             # --- VALIDATION: ตรวจสอบ Division และ Department ---
             result = self._validate_and_fix_codes(result)
