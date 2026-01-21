@@ -111,13 +111,13 @@ if 'processing_results' in st.session_state:
         
         # ดูว่ามีกี่ vendor
         if 'vendor_code' in results.columns:
-        unique_vendors = results['vendor_code'].unique()
-        st.success(f"✅ มี {len(unique_vendors)} vendors")
-        
-        st.markdown("### Vendors ในผลลัพธ์:")
-        for i, vendor in enumerate(unique_vendors, 1):
-            vendor_data = results[results['vendor_code'] == vendor]
-            st.text(f"{i}. {vendor}: {len(vendor_data)} รายการ")
+            unique_vendors = results['vendor_code'].unique()
+            st.success(f"✅ มี {len(unique_vendors)} vendors")
+            
+            st.markdown("### Vendors ในผลลัพธ์:")
+            for i, vendor in enumerate(unique_vendors, 1):
+                vendor_data = results[results['vendor_code'] == vendor]
+                st.text(f"{i}. {vendor}: {len(vendor_data)} รายการ")
         
         # เปรียบเทียบกับ JSON
         json_vendors = set()
