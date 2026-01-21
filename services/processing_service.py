@@ -272,14 +272,16 @@ class ProcessingService:
     
     def save_session(self, session_name: str = None) -> str:
         """
-        บันทึก session สำหรับใช้ในส่วนที่ 2
+        บันทึก session ใน st.session_state (ไม่ใช้ไฟล์)
         
         Args:
             session_name: ชื่อ session (optional)
             
         Returns:
-            Path to saved session file
+            Session name
         """
+        import streamlit as st
+        
         if session_name is None:
             session_name = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         
@@ -288,23 +290,21 @@ class ProcessingService:
             'timestamp': pd.Timestamp.now().isoformat(),
             'processed_pdfs': self.processed_pdfs,
             'failed_pdfs': self.failed_pdfs,
-            'summary': self.get_processing_summary()
+            'summary': self.get_processing_summary(),
+            'results': self.results  # เก็บ DataFrame ใน memory!
         }
         
-        # Save results DataFrame
-        results_folder = os.path.join(self.base_folder, 'results')
-        os.makedirs(results_folder, exist_ok=True)
+        # บันทึกใน session_state
+        if 'saved_sessions' not in st.session_state:
+            st.session_state.saved_sessions = {}
         
-        # Save metadata as JSON
-        metadata_path = os.path.join(results_folder, f"{session_name}_metadata.json")
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(session_data, f, ensure_ascii=False, indent=2)
+        st.session_state.saved_sessions[session_name] = session_data
+        st.session_state.current_session = session_name
         
-        # Save results as Parquet (fast loading)
+        print(f"\n💾 บันทึก session ใน memory: {session_name}")
         if self.results is not None:
-            results_path = os.path.join(results_folder, f"{session_name}_results.parquet")
-            self.results.to_parquet(results_path, index=False)
-            session_data['results_path'] = results_path
+            print(f"   📊 Results: {len(self.results)} รายการ")
+        else:
+            print(f"   ⚠️ ไม่มี results")
         
-        print(f"\n💾 บันทึก session: {session_name}")
-        return metadata_path
+        return session_name
