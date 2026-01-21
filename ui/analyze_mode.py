@@ -200,15 +200,13 @@ def run_processing(api_key, pdf_files, ap_file, ar_file, delay_seconds, show_pdf
         progress_callback=update_analysis
     )
     
-    # Save
-    session_file = service.save_session()
-    
     progress_bar.progress(1.0)
     status_text.text("✅ เสร็จสิ้น!")
     
+    # Store in session state
     st.session_state.processing_results = results
     st.session_state.processing_summary = service.get_processing_summary()
-    st.session_state.session_file = session_file
+    st.session_state.recon_system = service.recon_system  # เพิ่มบรรทัดนี้!
     
     st.success(f"✅ สำเร็จ! PDF: {success}, รายการ: {len(results) if results is not None else 0}")
     
@@ -249,20 +247,53 @@ def show_results_section():
         # Download
         st.markdown("#### 💾 ดาวน์โหลด")
         
-        results_folder = DIRECTORIES['results']
-        result_files = list(results_folder.glob("*.xlsx"))
+        # Import reporting service
+        from services.reporting_service import ReportingService
         
-        if result_files:
-            latest = max(result_files, key=lambda x: x.stat().st_mtime)
-            st.success(f"✅ บันทึกแล้ว: `data/results/{latest.name}`")
+        reporter = ReportingService()
+        
+        # Get data from reconciliation system
+        recon_system = st.session_state.get('recon_system')
+        
+        if recon_system:
+            calculated = recon_system.calculated_allowances
+            summary = recon_system.generate_summary_report()
+        else:
+            calculated = None
+            summary = None
+        
+        # Generate Excel file in memory
+        excel_bytes = reporter.export_to_excel_bytes(
+            reconciliation_df=results,
+            calculated_df=calculated,
+            summary_df=summary
+        )
+        
+        # Generate filename
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"TTA_Reconciliation_{timestamp}.xlsx"
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                "📥 ดาวน์โหลด Excel",
+                data=excel_bytes,
+                file_name=filename,
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                use_container_width=True
+            )
+        
+        with col2:
+            csv_bytes = reporter.export_to_csv_bytes(results)
+            csv_filename = f"TTA_Reconciliation_{timestamp}.csv"
             
-            with open(latest, 'rb') as f:
-                st.download_button(
-                    "📥 ดาวน์โหลด Excel",
-                    data=f,
-                    file_name=latest.name,
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True
-                )
+            st.download_button(
+                "📥 ดาวน์โหลด CSV",
+                data=csv_bytes,
+                file_name=csv_filename,
+                mime='text/csv',
+                use_container_width=True
+            )
     else:
         st.warning("⚠️ ไม่มีข้อมูล")
