@@ -1,297 +1,220 @@
 """
-Reporting Service - จัดการการ export รายงานในรูปแบบต่างๆ
+Reporting Service - สร้างรายงานและ export ผลลัพธ์
+แก้ไขให้ทำงานกับ Streamlit Cloud (in-memory export)
 """
 
-import os
-from pathlib import Path
-from typing import Optional, List
 import pandas as pd
-from openpyxl import load_workbook
+import io
+from datetime import datetime
+from typing import Optional
+import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-
-from config.settings import EXPORT_SETTINGS
 
 
 class ReportingService:
     """
-    Service สำหรับการ export รายงาน
+    Service สำหรับสร้างรายงานและ export ผลลัพธ์
     """
     
-    def __init__(self, output_folder: str = None):
-        """
-        Initialize reporting service
-        
-        Args:
-            output_folder: โฟลเดอร์สำหรับเก็บรายงาน
-        """
-        if output_folder is None:
-            from config.settings import DIRECTORIES
-            output_folder = str(DIRECTORIES['results'])
-        
-        self.output_folder = output_folder
-        os.makedirs(output_folder, exist_ok=True)
+    def __init__(self):
+        """Initialize reporting service"""
+        pass
     
-    def export_to_excel(
-        self,
-        data: pd.DataFrame,
-        filename: str = None,
-        sheet_name: str = 'Data',
-        apply_formatting: bool = True
-    ) -> str:
-        """
-        Export DataFrame เป็น Excel พร้อมการจัดรูปแบบ
-        
-        Args:
-            data: DataFrame ที่จะ export
-            filename: ชื่อไฟล์ (ถ้าไม่ระบุจะสร้างอัตโนมัติ)
-            sheet_name: ชื่อ sheet
-            apply_formatting: จัดรูปแบบหรือไม่
-            
-        Returns:
-            Path to exported file
-        """
-        if filename is None:
-            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"report_{timestamp}.xlsx"
-        
-        filepath = os.path.join(self.output_folder, filename)
-        
-        # Export basic Excel
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            data.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        # Apply formatting if requested
-        if apply_formatting:
-            self._apply_excel_formatting(filepath, sheet_name)
-        
-        print(f"✅ Export Excel สำเร็จ: {filename}")
-        return filepath
-    
-    def export_reconciliation_report(
-        self,
+    def export_to_excel_bytes(
+        self, 
         reconciliation_df: pd.DataFrame,
         calculated_df: Optional[pd.DataFrame] = None,
-        summary_df: Optional[pd.DataFrame] = None,
-        filename: str = None
-    ) -> str:
+        summary_df: Optional[pd.DataFrame] = None
+    ) -> bytes:
         """
-        Export รายงานการเปรียบเทียบแบบสมบูรณ์ (3 sheets)
+        Export ผลลัพธ์เป็น Excel ในรูปแบบ bytes (in-memory)
+        สำหรับ Streamlit download_button
         
         Args:
-            reconciliation_df: ข้อมูลการเปรียบเทียบ
-            calculated_df: ข้อมูลการคำนวณ (optional)
-            summary_df: ข้อมูลสรุป (optional)
-            filename: ชื่อไฟล์
+            reconciliation_df: DataFrame ผลการเปรียบเทียบ
+            calculated_df: DataFrame การคำนวณ allowances (optional)
+            summary_df: DataFrame สรุปผล (optional)
             
         Returns:
-            Path to exported file
+            bytes: Excel file content
         """
-        if filename is None:
-            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"TTA_Reconciliation_{timestamp}.xlsx"
+        output = io.BytesIO()
         
-        filepath = os.path.join(self.output_folder, filename)
-        
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # Sheet 1: Summary (ถ้ามี)
-            if summary_df is not None:
-                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Sheet 1: Reconciliation (ผลการเปรียบเทียบ)
+            if reconciliation_df is not None and len(reconciliation_df) > 0:
+                reconciliation_df.to_excel(
+                    writer, 
+                    sheet_name='Reconciliation', 
+                    index=False
+                )
+                self._format_reconciliation_sheet(
+                    writer.sheets['Reconciliation'],
+                    reconciliation_df
+                )
             
-            # Sheet 2: Reconciliation
-            reconciliation_df.to_excel(writer, sheet_name='Reconciliation', index=False)
+            # Sheet 2: Calculated Allowances (การคำนวณ)
+            if calculated_df is not None and len(calculated_df) > 0:
+                calculated_df.to_excel(
+                    writer, 
+                    sheet_name='Calculated', 
+                    index=False
+                )
+                self._format_calculated_sheet(
+                    writer.sheets['Calculated'],
+                    calculated_df
+                )
             
-            # Sheet 3: Calculated (ถ้ามี)
-            if calculated_df is not None:
-                calculated_df.to_excel(writer, sheet_name='Calculated', index=False)
+            # Sheet 3: Summary (สรุปผล)
+            if summary_df is not None and len(summary_df) > 0:
+                summary_df.to_excel(
+                    writer, 
+                    sheet_name='Summary', 
+                    index=False
+                )
+                self._format_summary_sheet(
+                    writer.sheets['Summary'],
+                    summary_df
+                )
         
-        # Apply formatting to all sheets
-        wb = load_workbook(filepath)
-        for sheet_name in wb.sheetnames:
-            self._format_sheet(wb[sheet_name])
-        wb.save(filepath)
-        
-        print(f"✅ Export รายงานเปรียบเทียบสำเร็จ: {filename}")
-        return filepath
+        output.seek(0)
+        return output.getvalue()
     
-    def export_to_csv(
-        self,
-        data: pd.DataFrame,
-        filename: str = None,
-        encoding: str = 'utf-8-sig'
-    ) -> str:
-        """
-        Export DataFrame เป็น CSV
-        
-        Args:
-            data: DataFrame ที่จะ export
-            filename: ชื่อไฟล์
-            encoding: การ encode (default: utf-8-sig สำหรับ Excel)
-            
-        Returns:
-            Path to exported file
-        """
-        if filename is None:
-            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"report_{timestamp}.csv"
-        
-        filepath = os.path.join(self.output_folder, filename)
-        data.to_csv(filepath, index=False, encoding=encoding)
-        
-        print(f"✅ Export CSV สำเร็จ: {filename}")
-        return filepath
-    
-    def _apply_excel_formatting(self, filepath: str, sheet_name: str):
-        """
-        จัดรูปแบบ Excel
-        
-        Args:
-            filepath: Path ไฟล์ Excel
-            sheet_name: ชื่อ sheet ที่จะจัดรูปแบบ
-        """
-        wb = load_workbook(filepath)
-        if sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            self._format_sheet(ws)
-            wb.save(filepath)
-    
-    def _format_sheet(self, ws):
-        """
-        จัดรูปแบบ worksheet
-        
-        Args:
-            ws: Worksheet object
-        """
-        # Header formatting
+    def _format_reconciliation_sheet(self, ws, df):
+        """จัดรูปแบบ sheet Reconciliation"""
+        # Header styling
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_alignment = Alignment(horizontal="center", vertical="center")
+        header_font = Font(color="FFFFFF", bold=True)
         
-        # Border
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        
-        # Format header row
         for cell in ws[1]:
             cell.fill = header_fill
             cell.font = header_font
-            cell.alignment = header_alignment
-            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Auto-adjust column widths
-        for column in ws.columns:
-            max_length = 0
-            column_letter = get_column_letter(column[0].column)
-            
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            
-            adjusted_width = min(max_length + 2, 50)  # Max width 50
-            ws.column_dimensions[column_letter].width = adjusted_width
-        
-        # Format data rows
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            for cell in row:
-                cell.border = thin_border
-                cell.alignment = Alignment(vertical="center")
-                
-                # Format numbers
-                if isinstance(cell.value, (int, float)):
-                    cell.number_format = '#,##0.00'
-        
-        # Freeze header row
-        ws.freeze_panes = 'A2'
-    
-    def create_comparison_chart(
-        self,
-        summary_df: pd.DataFrame,
-        chart_type: str = 'bar'
-    ) -> str:
-        """
-        สร้างกราฟเปรียบเทียบ (สำหรับอนาคต)
-        
-        Args:
-            summary_df: ข้อมูลสรุป
-            chart_type: ประเภทกราฟ
-            
-        Returns:
-            Path to chart file
-        """
-        # TODO: Implement chart generation with matplotlib or plotly
-        pass
-    
-    def export_filtered_data(
-        self,
-        data: pd.DataFrame,
-        filters: dict,
-        export_format: str = 'excel',
-        filename: str = None
-    ) -> str:
-        """
-        Export ข้อมูลที่กรองแล้ว
-        
-        Args:
-            data: DataFrame ต้นฉบับ
-            filters: Dictionary ของเงื่อนไขการกรอง
-            export_format: 'excel' หรือ 'csv'
-            filename: ชื่อไฟล์
-            
-        Returns:
-            Path to exported file
-        """
-        # Apply filters
-        filtered_data = data.copy()
-        
-        for column, value in filters.items():
-            if value is not None and column in filtered_data.columns:
-                if isinstance(value, list):
-                    filtered_data = filtered_data[filtered_data[column].isin(value)]
-                else:
-                    filtered_data = filtered_data[filtered_data[column] == value]
-        
-        # Export
-        if export_format.lower() == 'excel':
-            return self.export_to_excel(filtered_data, filename)
-        else:
-            return self.export_to_csv(filtered_data, filename)
-    
-    def generate_audit_summary(
-        self,
-        reconciliation_df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        สร้างสรุปสำหรับผู้ตรวจสอบ
-        
-        Args:
-            reconciliation_df: ข้อมูลการเปรียบเทียบ
-            
-        Returns:
-            DataFrame สรุป
-        """
-        summary = {
-            'total_vendors': reconciliation_df['vendor_code'].nunique(),
-            'total_categories': reconciliation_df['category_code'].nunique(),
-            'total_should_collect': reconciliation_df['should_collect'].sum(),
-            'total_actually_collected': reconciliation_df['actually_collected'].sum(),
-            'total_difference': reconciliation_df['difference'].sum(),
+        # Column widths
+        column_widths = {
+            'A': 15,  # tta_key
+            'B': 12,  # vendor_code
+            'C': 30,  # vendor_name
+            'D': 12,  # category_code
+            'E': 30,  # category_name
+            'F': 15,  # should_collect
+            'G': 15,  # actually_collected
+            'H': 15,  # difference
+            'I': 12,  # status
+            'J': 12,  # variance_pct
         }
         
-        # Status breakdown
-        status_counts = reconciliation_df['status'].value_counts()
-        for status, count in status_counts.items():
-            summary[f'status_{status}'] = count
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
         
-        # Variance statistics
-        summary['avg_variance_pct'] = reconciliation_df['variance_pct'].mean()
-        summary['max_variance_pct'] = reconciliation_df['variance_pct'].max()
-        summary['min_variance_pct'] = reconciliation_df['variance_pct'].min()
+        # Number formatting
+        for row in range(2, len(df) + 2):
+            # Format currency columns
+            for col in ['F', 'G', 'H']:
+                ws[f'{col}{row}'].number_format = '#,##0.00'
+            
+            # Format percentage
+            ws[f'J{row}'].number_format = '0.00%'
+            
+            # Status color coding
+            status_cell = ws[f'I{row}']
+            status = status_cell.value
+            if status and '✅' in str(status):
+                status_cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            elif status and '❌' in str(status):
+                status_cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+            elif status and '⚠️' in str(status):
+                status_cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
         
-        return pd.DataFrame([summary])
+        # Freeze panes
+        ws.freeze_panes = 'A2'
+    
+    def _format_calculated_sheet(self, ws, df):
+        """จัดรูปแบบ sheet Calculated"""
+        # Header styling
+        header_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Column widths
+        ws.column_dimensions['A'].width = 12  # vendor_code
+        ws.column_dimensions['B'].width = 30  # vendor_name
+        ws.column_dimensions['C'].width = 10  # division
+        ws.column_dimensions['D'].width = 10  # department
+        ws.column_dimensions['E'].width = 15  # tta_key
+        ws.column_dimensions['F'].width = 8   # year
+        ws.column_dimensions['G'].width = 15  # purchase_amount
+        ws.column_dimensions['H'].width = 12  # category_code
+        ws.column_dimensions['I'].width = 30  # category_name
+        ws.column_dimensions['J'].width = 12  # rate_percent
+        ws.column_dimensions['K'].width = 15  # fix_amount
+        ws.column_dimensions['L'].width = 15  # calculated_amount
+        
+        # Number formatting
+        for row in range(2, len(df) + 2):
+            ws[f'G{row}'].number_format = '#,##0.00'  # purchase_amount
+            ws[f'J{row}'].number_format = '0.00%'     # rate_percent
+            ws[f'K{row}'].number_format = '#,##0.00'  # fix_amount
+            ws[f'L{row}'].number_format = '#,##0.00'  # calculated_amount
+        
+        ws.freeze_panes = 'A2'
+    
+    def _format_summary_sheet(self, ws, df):
+        """จัดรูปแบบ sheet Summary"""
+        # Header styling
+        header_fill = PatternFill(start_color="ED7D31", end_color="ED7D31", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Column widths
+        ws.column_dimensions['A'].width = 12  # vendor_code
+        ws.column_dimensions['B'].width = 30  # vendor_name
+        ws.column_dimensions['C'].width = 15  # should_collect
+        ws.column_dimensions['D'].width = 15  # actually_collected
+        ws.column_dimensions['E'].width = 15  # difference
+        ws.column_dimensions['F'].width = 12  # status
+        ws.column_dimensions['G'].width = 12  # variance_pct
+        
+        # Number formatting
+        for row in range(2, len(df) + 2):
+            ws[f'C{row}'].number_format = '#,##0.00'  # should_collect
+            ws[f'D{row}'].number_format = '#,##0.00'  # actually_collected
+            ws[f'E{row}'].number_format = '#,##0.00'  # difference
+            ws[f'G{row}'].number_format = '0.00%'     # variance_pct
+            
+            # Status color coding
+            status_cell = ws[f'F{row}']
+            status = status_cell.value
+            if status and '✅' in str(status):
+                status_cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                for col in ['A', 'B', 'C', 'D', 'E', 'G']:
+                    ws[f'{col}{row}'].fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            elif status and '❌' in str(status):
+                status_cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                for col in ['A', 'B', 'C', 'D', 'E', 'G']:
+                    ws[f'{col}{row}'].fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+        
+        ws.freeze_panes = 'A2'
+    
+    def export_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
+        """
+        Export ผลลัพธ์เป็น CSV ในรูปแบบ bytes
+        
+        Args:
+            df: DataFrame to export
+            
+        Returns:
+            bytes: CSV file content
+        """
+        output = io.StringIO()
+        df.to_csv(output, index=False, encoding='utf-8-sig')
+        return output.getvalue().encode('utf-8-sig')
