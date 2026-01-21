@@ -125,6 +125,10 @@ class TTADocumentAnalyzer:
             2. มองหา "Department Code" หรือ "DEPT" ในเอกสาร → เป็น 10-99
             3. ถ้าเจอตัวเลข 60, 70, 80 → น่าจะเป็น Department ไม่ใช่ Division
             4. ถ้าไม่แน่ใจ → Division มักอยู่ในส่วน Header หรือ ด้านบนสุด
+          - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:
+          ** ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
+            
+
             
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
