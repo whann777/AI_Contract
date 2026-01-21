@@ -161,16 +161,11 @@ class TTADocumentAnalyzer:
         - บางไฟล์อาจจะมีเอกสารมากกว่า 2 หน้า ให้อ่านและสรุปข้อมูลเฉพาะ หน้า 1 และ 2 เท่านั้น หน้าอื่นไม่ต้องสนใจ
         
         **กฎ JSON Format (สำคัญมาก!):**
-        - ใช้ double quotes (") สำหรับ keys และ string values เท่านั้น
-        - ถ้ามี double quote ในข้อความ ให้แปลงเป็น single quote (') แทน
-        - ห้ามใส่ comma (,) หลังรายการสุดท้ายใน array หรือ object
-        - ห้ามใส่ comments (// หรือ /* */)
+        - ใช้ double quotes สำหรับ keys และ string values เท่านั้น
+        - ถ้ามี double quote ในข้อความ ให้แปลงเป็น single quote แทน
+        - ห้ามใส่ comma หลังรายการสุดท้ายใน array หรือ object
+        - ห้ามใส่ comments
         - ห้ามใช้ special characters ที่ทำให้ JSON ผิด
-        - ตัวอย่าง:
-          ✅ ถูก: "description": "Support for 'special' items"
-          ❌ ผิด: "description": "Support for "special" items"
-          ✅ ถูก: {"a": 1, "b": 2}
-          ❌ ผิด: {"a": 1, "b": 2,}
 
 
         Response ในรูปแบบ JSON เท่านั้น:
