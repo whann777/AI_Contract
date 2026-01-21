@@ -1,426 +1,546 @@
 """
-Auditor Mode UI - ส่วนที่ 2: Dashboard สำหรับผู้ตรวจสอบ
+Auditor Mode - Problem-Reason-Action Dashboard
+แสดงกราฟและวิเคราะห์ตามหลัก Problem → Reason → Action
 """
 
 import streamlit as st
 import pandas as pd
-import os
-import json
-from pathlib import Path
-
-from services.reporting_service import ReportingService
-from config.settings import DIRECTORIES, STATUS_DEFINITIONS
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 
 def show_auditor_mode():
-    """
-    แสดง UI สำหรับโหมด Auditor (ส่วนที่ 2)
-    """
-    st.title("👨‍💼 For Auditor: Dashboard & รายงาน")
+    """แสดง Dashboard สำหรับ Auditor"""
     
-    # Back button
-    if st.button("← กลับหน้าแรก"):
+    # Header
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <h1 style="color: white; margin: 0;">👨‍💼 Auditor Dashboard</h1>
+        <p style="color: #e0e0e0; margin: 5px 0 0 0;">Problem → Reason → Action Analysis</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("← Back to Home"):
         st.session_state.mode = None
         st.rerun()
     
     st.markdown("---")
     
     # Load session
-    session_loaded = load_session_selector()
-    
-    if session_loaded:
-        show_dashboard()
-    else:
+    if not load_session():
         show_no_session_message()
+        return
+    
+    # Main Dashboard
+    show_dashboard()
 
 
-def load_session_selector():
-    """
-    แสดงตัวเลือก session และโหลดข้อมูลจาก session_state
+def load_session():
+    """โหลด session data"""
     
-    Returns:
-        bool: True ถ้าโหลดสำเร็จ
-    """
-    st.markdown("### 📂 เลือก Session")
-    
-    # 🔍 DEBUG: แสดงข้อมูล session_state
-    st.write("🔍 Debug Information:")
-    st.write(f"- มี 'saved_sessions' ใน session_state? {('saved_sessions' in st.session_state)}")
-    
-    if 'saved_sessions' in st.session_state:
-        st.write(f"- จำนวน sessions: {len(st.session_state.saved_sessions)}")
-        st.write(f"- Session names: {list(st.session_state.saved_sessions.keys())}")
-    else:
-        st.write("- ไม่มี 'saved_sessions' เลย")
-    
-    st.write(f"- All session_state keys: {list(st.session_state.keys())}")
-    st.markdown("---")
-    
-    # ตรวจสอบว่ามี saved_sessions ใน session_state หรือไม่
-    if 'saved_sessions' not in st.session_state or not st.session_state.saved_sessions:
-        st.warning("⚠️ ไม่พบ session ใน memory")
-        st.info("💡 Tip: ต้องรันประมวลผลใน For Analyze mode ก่อน")
-        return False
-    
-    sessions = st.session_state.saved_sessions
-    
-    # Create session options
-    session_list = []
-    for name, data in sessions.items():
-        session_list.append({
-            'name': name,
-            'timestamp': data.get('timestamp', ''),
-            'data': data
-        })
-    
-    # Sort by timestamp (newest first)
-    session_list.sort(key=lambda x: x['timestamp'], reverse=True)
-    
-    # Session selector
-    session_options = [
-        f"{s['name']} ({s['timestamp'][:19] if s['timestamp'] else 'Unknown time'})"
-        for s in session_list
-    ]
-    
-    selected_idx = st.selectbox(
-        "เลือก session ที่ต้องการดู",
-        range(len(session_options)),
-        format_func=lambda i: session_options[i]
-    )
-    
-    # Load selected session
-    selected_session = session_list[selected_idx]
-    session_data = selected_session['data']
-    
-    # Store in session state for dashboard
-    st.session_state.current_session_data = session_data
-    st.session_state.dashboard_results = session_data.get('results')
-    
-    # แสดงข้อมูล session
-    col1, col2, col3 = st.columns(3)
-    
-    summary = session_data.get('summary', {})
-    col1.metric("ไฟล์ที่ประมวลผล", summary.get('total', 0))
-    col2.metric("สำเร็จ", summary.get('success', 0))
-    col3.metric("ล้มเหลว", summary.get('failed', 0))
-    
-    # แสดงผลลัพธ์
-    results = session_data.get('results')
-    if results is not None and len(results) > 0:
-        st.success(f"✅ พบข้อมูล: {len(results)} รายการ")
+    # เช็ค processing_results จาก Analyze mode
+    if 'processing_results' in st.session_state and st.session_state.processing_results is not None:
+        st.session_state.dashboard_results = st.session_state.processing_results
         return True
-    else:
-        st.warning("⚠️ Session นี้ไม่มีข้อมูลผลลัพธ์")
-        return False
+    
+    # เช็ค saved_sessions
+    if 'saved_sessions' in st.session_state and st.session_state.saved_sessions:
+        sessions = st.session_state.saved_sessions
+        
+        # ใช้ session ล่าสุด
+        latest_session = list(sessions.values())[-1]
+        st.session_state.dashboard_results = latest_session.get('results')
+        return True
+    
+    return False
 
 
 def show_no_session_message():
     """แสดงข้อความเมื่อไม่มี session"""
+    st.warning("⚠️ No data available")
     st.info("""
-    ℹ️ **ยังไม่มี session ที่บันทึกไว้**
-    
-    กรุณาไปที่โหมด **For Analyze** เพื่อประมวลผลข้อมูลก่อน
-    จากนั้นผลลัพธ์จะถูกบันทึกและแสดงที่นี่
+    💡 **How to get started:**
+    1. Go to "For Analyze" mode
+    2. Run processing
+    3. Come back here to view dashboard
     """)
 
 
 def show_dashboard():
     """แสดง Dashboard หลัก"""
     
-    # ใช้ข้อมูลจาก session_state
-    results_df = st.session_state.get('dashboard_results')
-    session_data = st.session_state.get('current_session_data', {})
+    results = st.session_state.dashboard_results
     
-    if results_df is None or len(results_df) == 0:
-        st.warning("⚠️ ไม่มีข้อมูลให้แสดง")
+    if results is None or len(results) == 0:
+        st.error("❌ No results data")
         return
     
-    # Session info
-    with st.expander("ℹ️ ข้อมูล Session"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"**Session:** {session_data.get('session_name', 'N/A')}")
-            st.markdown(f"**เวลา:** {session_data.get('timestamp', 'N/A')[:19]}")
-        
-        with col2:
-            summary = session_data.get('summary', {})
-            st.markdown(f"**PDF ประมวลผล:** {summary.get('total', 0)}")
-            st.markdown(f"**จำนวนรายการ:** {len(results_df)}")
+    # Executive Summary
+    show_executive_summary(results)
     
     st.markdown("---")
     
-    # Filters
-    show_filters(results_df)
+    # Problem-Reason-Action Framework
+    tabs = st.tabs([
+        "🔴 PROBLEM: Issues Overview",
+        "🔍 REASON: Root Cause Analysis", 
+        "✅ ACTION: Recommendations"
+    ])
     
-    st.markdown("---")
+    with tabs[0]:
+        show_problem_section(results)
     
-    # Apply filters
-    filtered_df = apply_filters(results_df)
+    with tabs[1]:
+        show_reason_section(results)
+    
+    with tabs[2]:
+        show_action_section(results)
+
+
+def show_executive_summary(results):
+    """แสดงสรุปผู้บริหาร"""
+    
+    st.markdown("### 📊 Executive Summary")
+    
+    # คำนวณตัวเลขสำคัญ
+    total_should = results['should_collect'].sum() if 'should_collect' in results.columns else 0
+    total_actual = results['actually_collected'].sum() if 'actually_collected' in results.columns else 0
+    total_diff = results['difference'].sum() if 'difference' in results.columns else 0
+    
+    # นับ status
+    status_counts = results['status'].value_counts().to_dict() if 'status' in results.columns else {}
+    match_count = status_counts.get('MATCH', 0)
+    over_count = status_counts.get('OVER', 0)
+    under_count = status_counts.get('UNDER', 0)
     
     # Metrics
-    show_metrics(filtered_df)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
-    st.markdown("---")
+    col1.metric(
+        "💰 Should Collect",
+        f"{total_should:,.0f}",
+        help="Total amount should be collected"
+    )
     
-    # Data table
-    show_data_table(filtered_df)
+    col2.metric(
+        "💵 Actually Collected", 
+        f"{total_actual:,.0f}",
+        delta=f"{total_diff:,.0f}",
+        delta_color="normal" if total_diff >= 0 else "inverse"
+    )
     
-    st.markdown("---")
+    col3.metric(
+        "📊 Total Items",
+        f"{len(results)}",
+        help="Total allowance items"
+    )
     
-    # Export section
-    show_export_section(filtered_df)
-
-
-def show_filters(df):
-    """แสดงตัวกรองข้อมูล"""
-    st.markdown("### 🔍 กรองข้อมูล")
+    col4.metric(
+        "🏢 Vendors",
+        f"{results['vendor_code'].nunique()}" if 'vendor_code' in results.columns else "0"
+    )
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Vendor filter
-        vendors = ['ทั้งหมด'] + sorted(df['vendor_code'].unique().tolist())
-        selected_vendors = st.multiselect(
-            "Vendor",
-            options=vendors,
-            default=['ทั้งหมด']
-        )
-        st.session_state.filter_vendors = selected_vendors
-    
-    with col2:
-        # Status filter
-        if 'status' in df.columns:
-            statuses = ['ทั้งหมด'] + sorted(df['status'].unique().tolist())
-            selected_status = st.selectbox(
-                "สถานะ",
-                options=statuses
-            )
-            st.session_state.filter_status = selected_status
-    
-    with col3:
-        # Division filter
-        if 'division' in df.columns:
-            divisions = ['ทั้งหมด'] + sorted(df['division'].unique().tolist())
-        elif 'tta_key' in df.columns:
-            # Extract division from tta_key
-            divisions = ['ทั้งหมด'] + sorted(set([
-                key.split('_')[1] for key in df['tta_key'].unique()
-            ]))
-        else:
-            divisions = ['ทั้งหมด']
-        
-        selected_division = st.selectbox(
-            "Division",
-            options=divisions
-        )
-        st.session_state.filter_division = selected_division
-
-
-def apply_filters(df):
-    """
-    ใช้ตัวกรองกับข้อมูล
-    
-    Args:
-        df: DataFrame ต้นฉบับ
-        
-    Returns:
-        DataFrame ที่กรองแล้ว
-    """
-    filtered_df = df.copy()
-    
-    # Vendor filter
-    vendors = st.session_state.get('filter_vendors', ['ทั้งหมด'])
-    if 'ทั้งหมด' not in vendors:
-        filtered_df = filtered_df[filtered_df['vendor_code'].isin(vendors)]
-    
-    # Status filter
-    status = st.session_state.get('filter_status', 'ทั้งหมด')
-    if status != 'ทั้งหมด' and 'status' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df['status'] == status]
-    
-    # Division filter
-    division = st.session_state.get('filter_division', 'ทั้งหมด')
-    if division != 'ทั้งหมด':
-        if 'division' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['division'] == division]
-        elif 'tta_key' in filtered_df.columns:
-            filtered_df = filtered_df[
-                filtered_df['tta_key'].str.split('_').str[1] == division
-            ]
-    
-    return filtered_df
-
-
-def show_metrics(df):
-    """แสดง Metrics cards"""
-    st.markdown("### 📊 สรุปข้อมูล")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        unique_vendors = df['vendor_code'].nunique() if 'vendor_code' in df.columns else 0
-        st.metric("จำนวน Vendors", unique_vendors)
-    
-    with col2:
-        total_records = len(df)
-        st.metric("จำนวนรายการ", total_records)
-    
-    with col3:
-        if 'should_collect' in df.columns:
-            total_should = df['should_collect'].sum()
-            st.metric("ควรเรียกเก็บ", f"{total_should:,.0f} บาท")
-        else:
-            st.metric("ควรเรียกเก็บ", "N/A")
-    
-    with col4:
-        if 'actually_collected' in df.columns:
-            total_actual = df['actually_collected'].sum()
-            st.metric("เรียกเก็บจริง", f"{total_actual:,.0f} บาท")
-            
-            # Collection rate
-            if 'should_collect' in df.columns and total_should > 0:
-                collection_rate = (total_actual / total_should) * 100
-                delta_color = "normal" if collection_rate >= 95 else "inverse"
-        else:
-            st.metric("เรียกเก็บจริง", "N/A")
-    
-    # Status breakdown
-    if 'status' in df.columns:
-        st.markdown("")
-        st.markdown("#### สถานะการเก็บเงิน")
-        
-        status_counts = df['status'].value_counts()
-        
-        cols = st.columns(len(status_counts))
-        for idx, (status, count) in enumerate(status_counts.items()):
-            with cols[idx]:
-                # Get emoji for status
-                emoji = "✅" if "ครบ" in status else ("❌" if "ขาด" in status else "⚠️")
-                st.metric(f"{emoji} {status}", count)
-
-
-def show_data_table(df):
-    """แสดงตารางข้อมูล"""
-    st.markdown("### 📋 รายละเอียดข้อมูล")
-    
-    # Column selection
-    if len(df.columns) > 10:
-        with st.expander("⚙️ เลือกคอลัมน์ที่จะแสดง"):
-            all_columns = df.columns.tolist()
-            default_columns = [
-                'vendor_code', 'vendor_name', 'category_code', 'category_name',
-                'should_collect', 'actually_collected', 'difference', 'status'
-            ]
-            default_columns = [col for col in default_columns if col in all_columns]
-            
-            selected_columns = st.multiselect(
-                "เลือกคอลัมน์",
-                options=all_columns,
-                default=default_columns
-            )
-            
-            if selected_columns:
-                display_df = df[selected_columns]
-            else:
-                display_df = df
+    # Overall Status
+    if abs(total_diff) < 1000:
+        overall_status = "🟡 MATCHED"
+        status_color = "#FFD700"
+    elif total_diff > 0:
+        overall_status = "🔴 OVER-COLLECTED"
+        status_color = "#FF6B6B"
     else:
-        display_df = df
+        overall_status = "🟢 UNDER-COLLECTED"
+        status_color = "#4ECDC4"
     
-    # Data table with styling
-    st.dataframe(
-        display_df,
-        use_container_width=True,
+    col5.markdown(f"""
+    <div style="padding: 10px; background: {status_color}; border-radius: 8px; text-align: center;">
+        <p style="margin: 0; font-size: 12px; color: white;">Overall Status</p>
+        <p style="margin: 5px 0 0 0; font-size: 18px; font-weight: bold; color: white;">{overall_status.split()[1]}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Status Distribution
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Pie Chart
+        fig = go.Figure(data=[go.Pie(
+            labels=['MATCH', 'OVER', 'UNDER'],
+            values=[match_count, over_count, under_count],
+            marker=dict(colors=['#FFD700', '#FF6B6B', '#4ECDC4']),
+            hole=0.4,
+            textinfo='label+percent+value',
+            textfont=dict(size=14)
+        )])
+        
+        fig.update_layout(
+            title="Status Distribution",
+            height=300,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("**Status Summary:**")
+        st.metric("✅ MATCH", f"{match_count} ({match_count/len(results)*100:.1f}%)")
+        st.metric("⚠️ OVER", f"{over_count} ({over_count/len(results)*100:.1f}%)")
+        st.metric("❌ UNDER", f"{under_count} ({under_count/len(results)*100:.1f}%)")
+
+
+def show_problem_section(results):
+    """🔴 PROBLEM: แสดงปัญหาที่พบ"""
+    
+    st.markdown("## 🔴 PROBLEM: Issues Overview")
+    st.markdown("**ปัญหาที่พบในการเรียกเก็บเงิน**")
+    
+    # 1. Top Issues by Amount
+    st.markdown("### 1️⃣ Top Issues by Variance Amount")
+    
+    # เรียงตาม difference (absolute value)
+    top_issues = results.copy()
+    top_issues['abs_diff'] = top_issues['difference'].abs()
+    top_issues = top_issues.nlargest(10, 'abs_diff')
+    
+    # Bar chart
+    fig = go.Figure()
+    
+    colors = []
+    for status in top_issues['status']:
+        if status == 'MATCH':
+            colors.append('#FFD700')
+        elif status == 'OVER':
+            colors.append('#FF6B6B')
+        else:
+            colors.append('#4ECDC4')
+    
+    fig.add_trace(go.Bar(
+        x=top_issues['difference'],
+        y=top_issues['category_name'] + ' (' + top_issues['vendor_name'].str[:20] + '...)',
+        orientation='h',
+        marker=dict(color=colors),
+        text=top_issues['difference'].apply(lambda x: f"{x:,.0f}"),
+        textposition='auto'
+    ))
+    
+    fig.update_layout(
+        title="Top 10 Issues by Variance Amount",
+        xaxis_title="Difference (Baht)",
+        yaxis_title="",
+        height=500,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # 2. Issues by Vendor
+    st.markdown("### 2️⃣ Issues by Vendor")
+    
+    vendor_summary = results.groupby('vendor_name').agg({
+        'difference': 'sum',
+        'status': lambda x: (x == 'UNDER').sum()  # Count UNDER items
+    }).reset_index()
+    
+    vendor_summary.columns = ['vendor_name', 'total_diff', 'under_count']
+    vendor_summary = vendor_summary.sort_values('total_diff', ascending=True).head(10)
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=vendor_summary['total_diff'],
+        y=vendor_summary['vendor_name'].str[:30],
+        orientation='h',
+        marker=dict(
+            color=vendor_summary['total_diff'],
+            colorscale='RdYlGn',
+            showscale=True
+        ),
+        text=vendor_summary['total_diff'].apply(lambda x: f"{x:,.0f}"),
+        textposition='auto'
+    ))
+    
+    fig.update_layout(
+        title="Top 10 Vendors with Variance",
+        xaxis_title="Total Difference (Baht)",
+        yaxis_title="",
         height=500
     )
     
-    # Vendor drill-down
-    if 'vendor_code' in df.columns:
-        st.markdown("---")
-        st.markdown("#### 🔎 Drill-down: ดูรายละเอียด Vendor")
-        
-        vendors = sorted(df['vendor_code'].unique().tolist())
-        selected_vendor = st.selectbox(
-            "เลือก Vendor",
-            options=vendors,
-            format_func=lambda v: f"{v} - {df[df['vendor_code']==v]['vendor_name'].iloc[0] if 'vendor_name' in df.columns else v}"
-        )
-        
-        if selected_vendor:
-            vendor_data = df[df['vendor_code'] == selected_vendor]
-            
-            # Vendor summary
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if 'should_collect' in vendor_data.columns:
-                    st.metric("ควรเรียกเก็บ", f"{vendor_data['should_collect'].sum():,.0f}")
-            
-            with col2:
-                if 'actually_collected' in vendor_data.columns:
-                    st.metric("เรียกเก็บจริง", f"{vendor_data['actually_collected'].sum():,.0f}")
-            
-            with col3:
-                if 'difference' in vendor_data.columns:
-                    diff = vendor_data['difference'].sum()
-                    st.metric("ส่วนต่าง", f"{diff:,.0f}", delta_color="inverse" if diff < 0 else "normal")
-            
-            # Vendor detail table
-            st.dataframe(vendor_data, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # 3. Issues by Category
+    st.markdown("### 3️⃣ Issues by Allowance Category")
+    
+    category_summary = results.groupby('category_code').agg({
+        'difference': 'sum',
+        'category_name': 'first',
+        'status': 'count'
+    }).reset_index()
+    
+    category_summary.columns = ['category_code', 'total_diff', 'category_name', 'count']
+    category_summary = category_summary.sort_values('total_diff', key=abs, ascending=False).head(10)
+    
+    fig = px.bar(
+        category_summary,
+        x='category_code',
+        y='total_diff',
+        color='total_diff',
+        color_continuous_scale='RdYlGn',
+        text='total_diff',
+        hover_data=['category_name', 'count']
+    )
+    
+    fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+    fig.update_layout(
+        title="Top 10 Categories with Variance",
+        xaxis_title="Category Code",
+        yaxis_title="Total Difference (Baht)",
+        height=400
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def show_export_section(df):
-    """แสดงส่วน Export"""
-    st.markdown("### 💾 Export รายงาน")
+def show_reason_section(results):
+    """🔍 REASON: วิเคราะห์สาเหตุ"""
+    
+    st.markdown("## 🔍 REASON: Root Cause Analysis")
+    st.markdown("**วิเคราะห์สาเหตุของปัญหา**")
+    
+    # 1. Variance Distribution
+    st.markdown("### 1️⃣ Variance Distribution Analysis")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### Excel (จัดรูปแบบ)")
+        # Histogram
+        fig = px.histogram(
+            results,
+            x='variance_pct',
+            nbins=50,
+            color='status',
+            color_discrete_map={
+                'MATCH': '#FFD700',
+                'OVER': '#FF6B6B',
+                'UNDER': '#4ECDC4'
+            },
+            title="Distribution of Variance %"
+        )
         
-        if st.button("📥 สร้างรายงาน Excel", use_container_width=True):
-            reporter = ReportingService()
-            
-            # Create summary
-            if 'should_collect' in df.columns:
-                summary_df = df.groupby(['vendor_code', 'vendor_name']).agg({
-                    'should_collect': 'sum',
-                    'actually_collected': 'sum',
-                    'difference': 'sum'
-                }).reset_index()
-            else:
-                summary_df = None
-            
-            # Export
-            excel_file = reporter.export_reconciliation_report(
-                reconciliation_df=df,
-                summary_df=summary_df,
-                filename=f"audit_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            )
-            
-            # Download button
-            with open(excel_file, 'rb') as f:
-                st.download_button(
-                    "💾 ดาวน์โหลด Excel",
-                    data=f,
-                    file_name=os.path.basename(excel_file),
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True
-                )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("#### CSV (ข้อมูลดิบ)")
-        
-        csv = df.to_csv(index=False, encoding='utf-8-sig')
-        
-        st.download_button(
-            "💾 ดาวน์โหลด CSV",
-            data=csv,
-            file_name=f"audit_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime='text/csv',
-            use_container_width=True
+        # Box plot
+        fig = px.box(
+            results,
+            x='status',
+            y='variance_pct',
+            color='status',
+            color_discrete_map={
+                'MATCH': '#FFD700',
+                'OVER': '#FF6B6B',
+                'UNDER': '#4ECDC4'
+            },
+            title="Variance % by Status"
         )
+        
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
     
-    # Export filtered data note
-    if 'filter_vendors' in st.session_state or 'filter_status' in st.session_state:
-        st.info("ℹ️ การ export จะใช้ข้อมูลที่กรองแล้ว")
+    # 2. Pattern Analysis
+    st.markdown("### 2️⃣ Pattern Analysis")
+    
+    # Scatter plot: Should vs Actually
+    fig = px.scatter(
+        results,
+        x='should_collect',
+        y='actually_collected',
+        color='status',
+        size='difference',
+        hover_data=['vendor_name', 'category_name'],
+        color_discrete_map={
+            'MATCH': '#FFD700',
+            'OVER': '#FF6B6B',
+            'UNDER': '#4ECDC4'
+        },
+        title="Should Collect vs Actually Collected"
+    )
+    
+    # เพิ่มเส้น y=x
+    max_val = max(results['should_collect'].max(), results['actually_collected'].max())
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[0, max_val],
+        mode='lines',
+        line=dict(dash='dash', color='gray'),
+        name='Perfect Match',
+        showlegend=True
+    ))
+    
+    fig.update_layout(height=500)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # 3. Root Cause Summary
+    st.markdown("### 3️⃣ Identified Root Causes")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**🔴 OVER-COLLECTED (เกิน):**")
+        over_items = results[results['status'] == 'OVER']
+        if len(over_items) > 0:
+            st.info(f"""
+            - จำนวน: {len(over_items)} รายการ
+            - ยอดรวมที่เกิน: {over_items['difference'].sum():,.0f} บาท
+            - เฉลี่ย % ที่เกิน: {over_items['variance_pct'].mean():.2f}%
+            
+            **สาเหตุที่เป็นไปได้:**
+            - เรียกเก็บซ้ำซ้อน
+            - คำนวณอัตราผิด
+            - ไม่ปรับลดตาม credit note
+            """)
+        else:
+            st.success("ไม่พบการเรียกเก็บเกิน")
+    
+    with col2:
+        st.markdown("**🟢 UNDER-COLLECTED (ขาด):**")
+        under_items = results[results['status'] == 'UNDER']
+        if len(under_items) > 0:
+            st.warning(f"""
+            - จำนวน: {len(under_items)} รายการ
+            - ยอดรวมที่ขาด: {abs(under_items['difference'].sum()):,.0f} บาท
+            - เฉลี่ย % ที่ขาด: {abs(under_items['variance_pct'].mean()):.2f}%
+            
+            **สาเหตุที่เป็นไปได้:**
+            - ยังไม่เรียกเก็บครบ
+            - มีส่วนลดที่ยังไม่นำมาคิด
+            - ข้อมูลยังไม่อัปเดต
+            """)
+        else:
+            st.success("ไม่พบการเรียกเก็บขาด")
+
+
+def show_action_section(results):
+    """✅ ACTION: แนะนำการแก้ไข"""
+    
+    st.markdown("## ✅ ACTION: Recommended Actions")
+    st.markdown("**แนวทางแก้ไขและติดตาม**")
+    
+    # 1. Priority Actions
+    st.markdown("### 1️⃣ Priority Actions (High Impact)")
+    
+    # หารายการที่มี impact สูง
+    high_impact = results.copy()
+    high_impact['abs_diff'] = high_impact['difference'].abs()
+    high_impact = high_impact[high_impact['abs_diff'] > 10000]  # มากกว่า 10K
+    high_impact = high_impact.sort_values('abs_diff', ascending=False)
+    
+    if len(high_impact) > 0:
+        st.error(f"⚠️ พบ {len(high_impact)} รายการที่ต้องดำเนินการด่วน (ส่วนต่าง > 10,000 บาท)")
+        
+        # แสดงตาราง
+        action_table = high_impact[['vendor_name', 'category_name', 'difference', 'status']].head(10).copy()
+        action_table['action'] = action_table.apply(
+            lambda row: '🔴 ตรวจสอบด่วน' if row['status'] == 'OVER' else '🟢 ติดตามเรียกเก็บ',
+            axis=1
+        )
+        action_table.columns = ['Vendor', 'Category', 'Variance', 'Status', 'Action Required']
+        
+        st.dataframe(action_table, use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ ไม่พบรายการที่ต้องดำเนินการด่วน")
+    
+    # 2. Follow-up by Vendor
+    st.markdown("### 2️⃣ Vendor Follow-up Plan")
+    
+    vendor_action = results.groupby('vendor_name').agg({
+        'difference': ['sum', 'count'],
+        'status': lambda x: (x == 'UNDER').sum()
+    }).reset_index()
+    
+    vendor_action.columns = ['vendor_name', 'total_diff', 'item_count', 'under_count']
+    vendor_action = vendor_action[vendor_action['total_diff'].abs() > 5000]
+    vendor_action = vendor_action.sort_values('total_diff', key=abs, ascending=False)
+    
+    if len(vendor_action) > 0:
+        for idx, row in vendor_action.head(5).iterrows():
+            vendor = row['vendor_name']
+            diff = row['total_diff']
+            items = row['item_count']
+            under = row['under_count']
+            
+            if diff > 0:
+                action_type = "🔴 OVER-COLLECTED"
+                action = f"ตรวจสอบและออก Credit Note {diff:,.0f} บาท"
+                color = "#ffe6e6"
+            else:
+                action_type = "🟢 UNDER-COLLECTED"
+                action = f"ออกใบแจ้งหนี้เพิ่ม {abs(diff):,.0f} บาท"
+                color = "#e6f7ff"
+            
+            st.markdown(f"""
+            <div style="padding: 15px; background: {color}; border-radius: 8px; margin-bottom: 10px;">
+                <strong>{action_type}: {vendor[:50]}</strong><br>
+                📊 รายการ: {items} รายการ | ส่วนต่าง: {diff:,.0f} บาท<br>
+                ✅ <strong>Action:</strong> {action}
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # 3. Action Timeline
+    st.markdown("### 3️⃣ Recommended Timeline")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**🔴 Immediate (0-7 days)**")
+        immediate = results[results['difference'].abs() > 50000]
+        st.metric("Items to review", len(immediate))
+        st.caption("Variance > 50K baht")
+    
+    with col2:
+        st.markdown("**🟡 Short-term (1-4 weeks)**")
+        short_term = results[
+            (results['difference'].abs() > 10000) & 
+            (results['difference'].abs() <= 50000)
+        ]
+        st.metric("Items to follow up", len(short_term))
+        st.caption("Variance 10K-50K baht")
+    
+    with col3:
+        st.markdown("**🟢 Long-term (1-3 months)**")
+        long_term = results[results['difference'].abs() <= 10000]
+        st.metric("Items to monitor", len(long_term))
+        st.caption("Variance < 10K baht")
+    
+    # 4. Export Actions
+    st.markdown("---")
+    st.markdown("### 📥 Export Action Plan")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Export high priority items
+        if len(high_impact) > 0:
+            csv = high_impact[['vendor_name', 'category_name', 'difference', 'status']].to_csv(index=False)
+            st.download_button(
+                "📥 Download Priority Actions (CSV)",
+                data=csv.encode('utf-8-sig'),
+                file_name="priority_actions.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    with col2:
+        # Export vendor follow-up
+        if len(vendor_action) > 0:
+            csv = vendor_action.to_csv(index=False)
+            st.download_button(
+                "📥 Download Vendor Follow-up Plan (CSV)",
+                data=csv.encode('utf-8-sig'),
+                file_name="vendor_followup.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
