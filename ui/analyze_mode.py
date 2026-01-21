@@ -26,8 +26,6 @@ def show_analyze_mode():
     st.markdown("---")
     
     # Initialize session state
-    if 'api_key' not in st.session_state:
-        st.session_state.api_key = ''
     if 'processing_status' not in st.session_state:
         st.session_state.processing_status = None
     
@@ -101,11 +99,13 @@ def show_processing_section():
     """ส่วนตั้งค่าและรันประมวลผล"""
     st.markdown("### ⚙️ ตั้งค่าและรันประมวลผล")
     
-    # ดึง API Key จาก Streamlit Secrets (วิธีที่ถูกต้อง!)
+    # ดึง API Key จาก Streamlit Secrets
+    api_key = ""
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
-    except Exception:
-        api_key = ""
+        if hasattr(st, 'secrets') and "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception as e:
+        st.error(f"Error reading secrets: {e}")
     
     # เก็บใน session_state
     if 'api_key' not in st.session_state:
@@ -165,8 +165,8 @@ def show_processing_section():
     if st.button("🚀 รันประมวลผล", type="primary"):
         run_processing(
             pdf_files=[str(f) for f in pdf_files],
-            ap_file=str(ap_files[0]),  # ใช้ไฟล์แรก
-            ar_file=str(ar_files[0]),  # ใช้ไฟล์แรก
+            ap_file=str(ap_files[0]),
+            ar_file=str(ar_files[0]),
             api_key=st.session_state.api_key,
             use_llm_validation=use_llm_validation,
             show_images=show_images
@@ -184,12 +184,12 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
     status_text = st.empty()
     
     def update_pdf_progress(current, total, filename):
-        progress = current / total * 0.6  # PDF processing = 60%
+        progress = current / total * 0.6
         progress_bar.progress(progress)
         status_text.text(f"กำลังประมวลผล PDF: {filename} ({current}/{total})")
     
     def update_analysis_progress(stage, progress_value):
-        progress = 0.6 + (progress_value * 0.4)  # Analysis = 40%
+        progress = 0.6 + (progress_value * 0.4)
         progress_bar.progress(progress)
         status_text.text(f"กำลังวิเคราะห์: {stage}")
     
@@ -213,21 +213,6 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
     
     # Save session
     session_name = service.save_session()
-    
-    # 🔍 DEBUG: แสดงข้อมูล session ที่บันทึก
-    st.write("---")
-    st.write("🔍 Debug: Session Information")
-    st.write(f"- Session name: {session_name}")
-    st.write(f"- มี 'saved_sessions'? {('saved_sessions' in st.session_state)}")
-    if 'saved_sessions' in st.session_state:
-        st.write(f"- จำนวน sessions: {len(st.session_state.saved_sessions)}")
-        st.write(f"- Session keys: {list(st.session_state.saved_sessions.keys())}")
-        
-        # แสดงข้อมูลใน session
-        if session_name in st.session_state.saved_sessions:
-            session_data = st.session_state.saved_sessions[session_name]
-            st.write(f"- Results shape: {session_data['results'].shape if session_data.get('results') is not None else 'None'}")
-    st.write("---")
     
     # Complete
     progress_bar.progress(1.0)
