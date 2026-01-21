@@ -101,8 +101,11 @@ def show_processing_section():
     """ส่วนตั้งค่าและรันประมวลผล"""
     st.markdown("### ⚙️ ตั้งค่าและรันประมวลผล")
     
-    # ดึง API Key จาก environment variable โดยตรง
-    api_key = os.getenv('GEMINI_API_KEY', '')
+    # ดึง API Key จาก Streamlit Secrets (วิธีที่ถูกต้อง!)
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        api_key = ""
     
     # เก็บใน session_state
     if 'api_key' not in st.session_state:
