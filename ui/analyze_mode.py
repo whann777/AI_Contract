@@ -258,34 +258,46 @@ def format_number(value):
 
 def create_calculated_sheet(results):
     """Sheet 1: Calculated - คำนวณจากสัญญา"""
-    calc_data = []
     
-    for _, row in results.iterrows():
-        calc_data.append({
-            'vendor_code': row.get('vendor_code', ''),
-            'vendor_name': row.get('vendor_name', ''),
-            'division': row.get('Division', ''),
-            'department': row.get('Department', ''),
-            'tta_key': row.get('tta_key', ''),
-            'year': row.get('year', 2023),
-            'purchase_amount': row.get('purchase_amount', 0),
-            'category_code': row.get('category_code', ''),
-            'category_name': row.get('category_name', ''),
-            'rate_percent': row.get('rate_percent', None),
-            'fix_amount': row.get('fix_amount', None),
-            'calculated_amount': row.get('should_collect', 0),
-            'calculation_type': row.get('calculation_type', ''),
-            'description': row.get('description', ''),
-            'payment_terms': row.get('payment_terms', '')
-        })
+    # คัดลอก columns ที่ต้องการ
+    columns_map = {
+        'vendor_code': 'vendor_code',
+        'vendor_name': 'vendor_name',
+        'Division': 'division',  # จาก results
+        'Department': 'department',  # จาก results
+        'tta_key': 'tta_key',
+        'year': 'year',
+        'purchase_amount': 'purchase_amount',
+        'category_code': 'category_code',
+        'category_name': 'category_name',
+        'rate_percent': 'rate_percent',
+        'fix_amount': 'fix_amount',
+        'should_collect': 'calculated_amount',  # จาก should_collect
+        'calculation_type': 'calculation_type',
+        'description': 'description',
+        'payment_terms': 'payment_terms'
+    }
     
-    df = pd.DataFrame(calc_data)
+    # สร้าง DataFrame ใหม่
+    df_data = {}
+    
+    for src_col, dest_col in columns_map.items():
+        if src_col in results.columns:
+            df_data[dest_col] = results[src_col]
+        else:
+            # ถ้าไม่มี column ให้ใส่ค่าว่าง
+            if dest_col == 'year':
+                df_data[dest_col] = 2023
+            else:
+                df_data[dest_col] = ''
+    
+    df = pd.DataFrame(df_data)
     
     # Format numbers
     num_cols = ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']
     for col in num_cols:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) and x != '' else '')
+            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) and str(x) != '' and str(x) != 'nan' else '')
     
     return df
 
@@ -396,6 +408,13 @@ def show_results_section():
     
     results = st.session_state.processing_results
     stats = st.session_state.get('processing_stats', {})
+    
+    # 🔍 DEBUG: แสดง columns ที่มี
+    with st.expander("🔍 Debug: Available Columns"):
+        st.write(f"**Columns in results:** {list(results.columns)}")
+        st.write(f"**Shape:** {results.shape}")
+        st.write(f"**Sample data:**")
+        st.dataframe(results.head(3))
     
     # Summary Metrics
     st.markdown("#### 📈 Processing Summary")
