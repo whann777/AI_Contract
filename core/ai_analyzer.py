@@ -106,10 +106,27 @@ class TTADocumentAnalyzer:
         คุณคือผู้เชี่ยวชาญด้านสัญญาการค้า (Trade Terms)
         โปรดวิเคราะห์ไฟล์เอกสารแนบนี้ (PDF) ซึ่งเป็นข้อตกลงทางการค้า และดึงข้อมูลออกมาในรูปแบบ JSON:
 
-        1. หา Vendor Code, Division Code, Division Name, Department Code, Division Name จากเอกสาร
-          **เอกสารทุกไฟล์จะมี Vendor Code, Division Code, Division Name, Department Code, Division Name เสมอ **
-          - Division Code จะขึ้นต้นด้วย 0 เสมอ เช่น 01, 02, 03
-          - ถ้าบางไฟล์มี Department มากกว่า 1 ให้เลือกหยิบมา 1 ตัว
+        1. หา Vendor Code, Division Code, Division Name, Department Code, Department Name จากเอกสาร
+          **กฎสำคัญ - READ CAREFULLY:**
+          - **Vendor Code**: ตัวเลข 7 หลัก (เช่น 6003053, 6003074)
+          - **Division Code**: ตัวเลข 2 หลัก ขึ้นต้นด้วย 0 เสมอ (01-09 เท่านั้น)
+            ❌ ห้ามใช้ 60, 70, 80 - นั่นไม่ใช่ Division Code!
+            ✅ ถูกต้อง: 01, 02, 03, 04, 05, 06, 07, 08, 09
+          - **Department Code**: ตัวเลข 2 หลัก (10-99)
+            ✅ ถูกต้อง: 10, 20, 30, 40, 50, 60, 70, 80, 90
+          - **ตัวอย่างที่ถูกต้อง:**
+            • Vendor: 6003053, Division: 05, Department: 60 ✅
+            • Vendor: 6003074, Division: 04, Department: 50 ✅
+          - **ตัวอย่างที่ผิด:**
+            • Vendor: 6003053, Division: 60, Department: 60 ❌ (60 ไม่ใช่ Division!)
+            
+          - **วิธีหา Division และ Department:**
+            1. มองหา "Division Code" หรือ "DIV" ในเอกสาร → ต้องเป็น 01-09
+            2. มองหา "Department Code" หรือ "DEPT" ในเอกสาร → เป็น 10-99
+            3. ถ้าเจอตัวเลข 60, 70, 80 → น่าจะเป็น Department ไม่ใช่ Division
+            4. ถ้าไม่แน่ใจ → Division มักอยู่ในส่วน Header หรือ ด้านบนสุด
+            
+            
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
         {categories_text}
@@ -144,10 +161,10 @@ class TTADocumentAnalyzer:
 
         Response ในรูปแบบ JSON เท่านั้น:
       {{
-        "vendor_code": "รหัสผู้ขาย",
-        "Division_code": "รหัสแผนก",
+        "vendor_code": "รหัสผู้ขาย 7 หลัก",
+        "Division_code": "รหัสแผนก 2 หลัก (01-09)",
         "Division_name": "ชื่อแผนก",
-        "Department_code": "รหัสฝ่าย",
+        "Department_code": "รหัสฝ่าย 2 หลัก (10-99)",
         "Department_name": "ชื่อฝ่าย",
         "allowances": [
           {{
@@ -239,7 +256,12 @@ class TTADocumentAnalyzer:
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
 
             # --- Robust Parsing ---
-            return json.loads(raw_text)
+            result = json.loads(raw_text)
+            
+            # --- VALIDATION: ตรวจสอบ Division และ Department ---
+            result = self._validate_and_fix_codes(result)
+            
+            return result
 
         except json.JSONDecodeError as je:
             # หาก Parse ไม่สำเร็จ จะทำการบันทึก Response ดิบลงไฟล์เพื่อ Debug
@@ -261,6 +283,81 @@ class TTADocumentAnalyzer:
                 return {"error": "🛑 MODEL NOT FOUND: ชื่อโมเดลไม่ถูกต้อง หรือ Account ไม่มีสิทธิ์ใช้"}
             else:
                 return {"error": f"Unknown Error: {e}"}
+    
+    def _validate_and_fix_codes(self, result: Dict) -> Dict:
+        """
+        ตรวจสอบและแก้ไข Division/Department codes ที่ผิดพลาด
+        
+        Args:
+            result: Dict จาก AI response
+            
+        Returns:
+            Dict ที่แก้ไขแล้ว
+        """
+        # ตรวจสอบ Division Code
+        div_code = result.get('Division_code')
+        dept_code = result.get('Department_code')
+        
+        # แปลงเป็น string ก่อน
+        if div_code is not None:
+            div_code = str(div_code).strip()
+        if dept_code is not None:
+            dept_code = str(dept_code).strip()
+        
+        print(f"\n🔍 VALIDATION:")
+        print(f"   Original - Division: {div_code}, Department: {dept_code}")
+        
+        # ตรวจสอบ Division Code
+        if div_code:
+            # ถ้า Division เป็น 2 หลัก แต่ไม่ใช่ 01-09
+            if len(div_code) == 2 and not div_code.startswith('0'):
+                # ตรวจสอบว่าอาจเป็น Department ที่เข้าใจผิด
+                if div_code.isdigit() and int(div_code) >= 10:
+                    print(f"   ⚠️  WARNING: Division '{div_code}' ไม่ถูกต้อง (ต้องเป็น 01-09)")
+                    print(f"   💡 คาดว่าอาจเป็น Department, แก้ไข Division → '00'")
+                    
+                    # ถ้า Department ว่าง ให้ใช้ค่าเดิมของ Division
+                    if not dept_code or dept_code in ['None', 'null', '']:
+                        result['Department_code'] = div_code
+                        print(f"   ✅ แก้ไข Department: None → {div_code}")
+                    
+                    result['Division_code'] = '00'
+            
+            # ถ้า Division ยาวกว่า 2 หลัก
+            elif len(div_code) > 2:
+                print(f"   ⚠️  WARNING: Division '{div_code}' ยาวเกิน 2 หลัก")
+                # เอา 2 หลักแรก
+                result['Division_code'] = div_code[:2].zfill(2)
+                print(f"   ✅ แก้ไข: {div_code} → {result['Division_code']}")
+            
+            # ถ้า Division เป็น 1 หลัก ให้เติม 0
+            elif len(div_code) == 1:
+                result['Division_code'] = div_code.zfill(2)
+                print(f"   ✅ แก้ไข: {div_code} → {result['Division_code']}")
+        
+        # ตรวจสอบ Department Code
+        if dept_code:
+            # ถ้า Department เป็น None, null, หรือว่าง
+            if dept_code in ['None', 'null', '']:
+                print(f"   ⚠️  WARNING: Department เป็น '{dept_code}'")
+                result['Department_code'] = '00'
+                print(f"   ✅ แก้ไข: None → 00")
+            
+            # ถ้า Department เป็น 1 หลัก ให้เติม 0
+            elif len(dept_code) == 1:
+                result['Department_code'] = dept_code.zfill(2)
+                print(f"   ✅ แก้ไข: {dept_code} → {result['Department_code']}")
+        else:
+            # ถ้าไม่มี Department เลย
+            print(f"   ⚠️  WARNING: Department เป็น None")
+            result['Department_code'] = '00'
+            print(f"   ✅ แก้ไข: None → 00")
+        
+        final_div = result.get('Division_code', 'N/A')
+        final_dept = result.get('Department_code', 'N/A')
+        print(f"   Final - Division: {final_div}, Department: {final_dept}")
+        
+        return result
 
     def format_output(self, result: Dict) -> str:
         """Format analysis result for display"""
