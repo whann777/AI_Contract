@@ -1,13 +1,11 @@
 """
 Analyze Mode UI - ส่วนที่ 1: สำหรับประมวลผลและวิเคราะห์
-แก้ไขให้อ่านไฟล์จาก data/ โดยตรง ไม่ต้องอัปโหลด
 """
 
 import streamlit as st
 import os
 from pathlib import Path
 import time
-import pandas as pd
 
 from services.processing_service import ProcessingService
 from config.settings import DIRECTORIES
@@ -15,8 +13,7 @@ from config.settings import DIRECTORIES
 
 def show_analyze_mode():
     """
-    แสดง UI สำหรับโหมด Analyze
-    อ่านไฟล์จากโฟลเดอร์ data/ โดยตรง
+    แสดง UI สำหรับโหมด Analyze (ส่วนที่ 1)
     """
     st.title("🔬 For Analyze: ประมวลผลสัญญาและข้อมูล")
     
@@ -27,71 +24,157 @@ def show_analyze_mode():
     
     st.markdown("---")
     
-    # Get API Key from Streamlit Secrets
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except Exception as e:
-        st.error("❌ ไม่พบ API Key ใน Streamlit Secrets")
-        st.info("💡 กรุณาตั้งค่า GEMINI_API_KEY ใน Settings → Secrets")
-        st.code("""
-        # ใน Streamlit Cloud:
-        # Settings → Secrets → เพิ่ม:
-        GEMINI_API_KEY = "your_api_key_here"
-        """)
-        return
+    # Initialize session state
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = ''
+    if 'processing_status' not in st.session_state:
+        st.session_state.processing_status = None
     
-    # Check files in data/ folders
-    st.markdown("### 📁 ไฟล์ที่พร้อมประมวลผล")
+    # Tabs for different steps
+    tab1, tab2, tab3 = st.tabs(["📁 อัปโหลดไฟล์", "⚙️ ตั้งค่า & รันระบบ", "📊 ผลลัพธ์"])
     
-    # Check PDF files
-    pdf_files = list(DIRECTORIES['agreements'].glob("*.pdf"))
+    with tab1:
+        show_file_upload_section()
     
-    # Check AP files  
-    ap_files = []
-    for pattern in ['*.csv', '*.CSV']:
-        ap_files.extend(list(DIRECTORIES['ap'].glob(pattern)))
+    with tab2:
+        show_processing_section()
     
-    # Check AR files
-    ar_files = []
-    for pattern in ['*.csv', '*.CSV']:
-        ar_files.extend(list(DIRECTORIES['ar'].glob(pattern)))
+    with tab3:
+        show_results_section()
+
+
+def show_file_upload_section():
+    """ส่วนอัปโหลดไฟล์"""
+    st.markdown("### 📁 อัปโหลดไฟล์ข้อมูล")
     
-    # Display file status
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 1. ไฟล์สัญญา PDF")
+        st.markdown("อัปโหลดไฟล์สัญญา (TTA) ที่ต้องการวิเคราะห์")
+        
+        uploaded_pdfs = st.file_uploader(
+            "เลือกไฟล์ PDF (สามารถเลือกหลายไฟล์)",
+            type=['pdf'],
+            accept_multiple_files=True,
+            key='pdf_uploader'
+        )
+        
+        if uploaded_pdfs:
+            st.success(f"✅ เลือกไฟล์แล้ว: {len(uploaded_pdfs)} ไฟล์")
+            
+            # Save to agreements folder
+            agreements_folder = DIRECTORIES['agreements']
+            saved_files = []
+            
+            for pdf_file in uploaded_pdfs:
+                file_path = agreements_folder / pdf_file.name
+                with open(file_path, 'wb') as f:
+                    f.write(pdf_file.getbuffer())
+                saved_files.append(str(file_path))
+            
+            st.session_state.pdf_files = saved_files
+            
+            # Show file list
+            with st.expander("📋 รายการไฟล์"):
+                for idx, filename in enumerate([f.name for f in uploaded_pdfs], 1):
+                    st.text(f"{idx}. {filename}")
+    
+    with col2:
+        st.markdown("#### 2. ไฟล์ข้อมูล AP")
+        st.markdown("อัปโหลดไฟล์ยอดซื้อ (Account Payable)")
+        
+        uploaded_ap = st.file_uploader(
+            "เลือกไฟล์ CSV",
+            type=['csv'],
+            key='ap_uploader'
+        )
+        
+        if uploaded_ap:
+            st.success(f"✅ เลือกไฟล์: {uploaded_ap.name}")
+            
+            # Save to ap folder
+            ap_folder = DIRECTORIES['ap']
+            file_path = ap_folder / uploaded_ap.name
+            with open(file_path, 'wb') as f:
+                f.write(uploaded_ap.getbuffer())
+            
+            st.session_state.ap_file = str(file_path)
+            
+            # Show preview
+            import pandas as pd
+            df = pd.read_csv(file_path, nrows=5)
+            with st.expander("👀 ตัวอย่างข้อมูล (5 แถวแรก)"):
+                st.dataframe(df)
+    
+    st.markdown("")
+    
+    st.markdown("#### 3. ไฟล์ข้อมูล AR")
+    st.markdown("อัปโหลดไฟล์ยอดเรียกเก็บ (Account Receivable)")
+    
+    uploaded_ar = st.file_uploader(
+        "เลือกไฟล์ CSV",
+        type=['csv'],
+        key='ar_uploader'
+    )
+    
+    if uploaded_ar:
+        st.success(f"✅ เลือกไฟล์: {uploaded_ar.name}")
+        
+        # Save to ar folder
+        ar_folder = DIRECTORIES['ar']
+        file_path = ar_folder / uploaded_ar.name
+        with open(file_path, 'wb') as f:
+            f.write(uploaded_ar.getbuffer())
+        
+        st.session_state.ar_file = str(file_path)
+        
+        # Show preview
+        import pandas as pd
+        df = pd.read_csv(file_path, nrows=5)
+        with st.expander("👀 ตัวอย่างข้อมูล (5 แถวแรก)"):
+            st.dataframe(df)
+    
+    # Summary
+    st.markdown("---")
+    st.markdown("### 📋 สรุปไฟล์ที่อัปโหลด")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if pdf_files:
-            st.success(f"✅ PDF สัญญา: {len(pdf_files)} ไฟล์")
-            with st.expander("📋 รายการไฟล์ PDF"):
-                for pdf in pdf_files:
-                    st.text(f"• {pdf.name}")
-        else:
-            st.error("❌ ไม่พบไฟล์ PDF")
-            st.info("💡 ใส่ไฟล์ PDF ในโฟลเดอร์ `data/agreements/` ใน GitHub")
+        pdf_count = len(st.session_state.get('pdf_files', []))
+        st.metric("PDF สัญญา", f"{pdf_count} ไฟล์")
     
     with col2:
-        if ap_files:
-            st.success(f"✅ AP CSV: {len(ap_files)} ไฟล์")
-            with st.expander("📋 รายการไฟล์ AP"):
-                for ap in ap_files:
-                    st.text(f"• {ap.name}")
-        else:
-            st.error("❌ ไม่พบไฟล์ AP")
-            st.info("💡 ใส่ไฟล์ CSV ในโฟลเดอร์ `data/ap/` ใน GitHub")
+        ap_status = "✅" if 'ap_file' in st.session_state else "❌"
+        st.metric("AP CSV", ap_status)
     
     with col3:
-        if ar_files:
-            st.success(f"✅ AR CSV: {len(ar_files)} ไฟล์")
-            with st.expander("📋 รายการไฟล์ AR"):
-                for ar in ar_files:
-                    st.text(f"• {ar.name}")
-        else:
-            st.warning("⚠️ ไม่พบไฟล์ AR (ไม่บังคับ)")
+        ar_status = "✅" if 'ar_file' in st.session_state else "❌"
+        st.metric("AR CSV", ar_status)
+
+
+def show_processing_section():
+    """ส่วนตั้งค่าและรันระบบ"""
+    st.markdown("### ⚙️ ตั้งค่าและรันระบบ")
+    
+    # API Key input
+    st.markdown("#### 🔑 Gemini API Key")
+    api_key = st.text_input(
+        "กรอก API Key ของคุณ",
+        type="password",
+        value=st.session_state.get('api_key', ''),
+        help="ได้รับจาก Google AI Studio: https://makersuite.google.com/app/apikey"
+    )
+    
+    if api_key:
+        st.session_state.api_key = api_key
+        st.success("✅ API Key ถูกบันทึกแล้ว")
     
     st.markdown("---")
     
     # Processing options
-    st.markdown("### ⚙️ ตัวเลือกการประมวลผล")
+    st.markdown("#### ⚙️ ตัวเลือกการประมวลผล")
     
     col1, col2 = st.columns(2)
     
@@ -101,80 +184,80 @@ def show_analyze_mode():
             min_value=0,
             max_value=60,
             value=30,
-            help="ป้องกัน API quota limit"
+            help="เพื่อป้องกัน API quota limit"
         )
         
         use_llm_validation = st.checkbox(
             "ใช้ LLM ตรวจสอบ REF_TYPE",
             value=True,
-            help="ใช้ AI ตรวจสอบความถูกต้องของ category"
+            help="ใช้ AI ตรวจสอบความถูกต้องของ category ใน AR"
         )
     
     with col2:
         show_pdf_images = st.checkbox(
             "แสดงภาพ PDF (Debug)",
             value=False,
-            help="แสดงภาพตัวอย่างจาก PDF"
+            help="แสดงภาพตัวอย่างจาก PDF (ใช้เวลานาน)"
         )
     
     st.markdown("---")
     
     # Run button
-    st.markdown("### 🚀 เริ่มประมวลผล")
+    st.markdown("#### 🚀 เริ่มประมวลผล")
     
     # Check prerequisites
-    can_run = len(pdf_files) > 0 and len(ap_files) > 0
+    can_run = (
+        'pdf_files' in st.session_state and len(st.session_state.pdf_files) > 0 and
+        'ap_file' in st.session_state and
+        'api_key' in st.session_state and st.session_state.api_key
+    )
     
     if not can_run:
-        st.warning("⚠️ กรุณาใส่ไฟล์ให้ครบ")
+        st.warning("⚠️ กรุณาอัปโหลดไฟล์และกรอก API Key ให้ครบถ้วน")
         missing = []
-        if len(pdf_files) == 0:
-            missing.append("- PDF สัญญา → `data/agreements/`")
-        if len(ap_files) == 0:
-            missing.append("- AP CSV → `data/ap/`")
+        if 'pdf_files' not in st.session_state or len(st.session_state.pdf_files) == 0:
+            missing.append("- ไฟล์ PDF สัญญา")
+        if 'ap_file' not in st.session_state:
+            missing.append("- ไฟล์ AP CSV")
+        if 'api_key' not in st.session_state or not st.session_state.api_key:
+            missing.append("- Gemini API Key")
         
-        for item in missing:
-            st.markdown(item)
+        if missing:
+            st.markdown("**ข้อมูลที่ยังขาด:**")
+            for item in missing:
+                st.markdown(item)
     
-    if st.button("🚀 เริ่มประมวลผล", disabled=not can_run, use_container_width=True, type="primary"):
-        run_processing(
-            api_key=api_key,
-            pdf_files=[str(f) for f in pdf_files],
-            ap_file=str(ap_files[0]) if ap_files else None,
-            ar_file=str(ar_files[0]) if ar_files else None,
-            delay_seconds=delay_seconds,
-            show_pdf_images=show_pdf_images,
-            use_llm_validation=use_llm_validation
-        )
-    
-    # Show results if available
-    if 'processing_results' in st.session_state:
-        show_results_section()
+    if st.button("🚀 เริ่มประมวลผล", disabled=not can_run, use_container_width=True):
+        run_processing(delay_seconds, show_pdf_images, use_llm_validation)
 
 
-def run_processing(api_key, pdf_files, ap_file, ar_file, delay_seconds, show_pdf_images, use_llm_validation):
+def run_processing(delay_seconds, show_pdf_images, use_llm_validation):
     """รันกระบวนการประมวลผล"""
     
+    # Initialize service
     service = ProcessingService(
-        api_key=api_key,
+        api_key=st.session_state.api_key,
         base_folder=str(DIRECTORIES['agreements'].parent)
     )
     
+    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    total_steps = len(pdf_files) + 5
+    # Step 1: Process PDFs
+    status_text.text("📄 กำลังประมวลผล PDF...")
+    
+    pdf_files = st.session_state.pdf_files
+    total_steps = len(pdf_files) + 5  # PDFs + 5 analysis steps
     current_step = 0
     
     def update_progress(current, total, filename):
         nonlocal current_step
         current_step += 1
         progress = current_step / total_steps
-        progress_bar.progress(min(progress, 0.95))
-        status_text.text(f"📄 {filename} ({current}/{total})")
+        progress_bar.progress(progress)
+        status_text.text(f"📄 กำลังประมวลผล: {filename} ({current}/{total})")
     
-    # Process PDFs
-    status_text.text("📄 กำลังประมวลผล PDF...")
     success, fail = service.process_contracts(
         pdf_files=pdf_files,
         show_images=show_pdf_images,
@@ -182,118 +265,142 @@ def run_processing(api_key, pdf_files, ap_file, ar_file, delay_seconds, show_pdf
         progress_callback=update_progress
     )
     
-    # Run analysis
+    # Step 2: Run full analysis
     current_step += 1
-    progress_bar.progress(min(current_step / total_steps, 0.95))
-    status_text.text("⚙️ กำลังวิเคราะห์...")
+    progress_bar.progress(current_step / total_steps)
+    status_text.text("⚙️ กำลังวิเคราะห์และเปรียบเทียบ...")
     
-    def update_analysis(message):
+    def update_analysis_progress(message):
         nonlocal current_step
         current_step += 1
-        progress_bar.progress(min(current_step / total_steps, 0.98))
+        progress = current_step / total_steps
+        progress_bar.progress(progress)
         status_text.text(message)
     
     results = service.run_full_analysis(
-        ap_file=ap_file,
-        ar_file=ar_file,
+        ap_file=st.session_state.get('ap_file'),
+        ar_file=st.session_state.get('ar_file'),
         use_llm_validation=use_llm_validation,
-        progress_callback=update_analysis
+        progress_callback=update_analysis_progress
     )
     
-    progress_bar.progress(1.0)
-    status_text.text("✅ เสร็จสิ้น!")
+    # Save session
+    session_file = service.save_session()
     
-    # Store in session state
+    # 🔍 DEBUG: แสดงข้อมูล session ที่บันทึก
+    st.write("---")
+    st.write("🔍 Debug: Session Information")
+    st.write(f"- Session name: {session_file}")
+    st.write(f"- มี 'saved_sessions'? {('saved_sessions' in st.session_state)}")
+    if 'saved_sessions' in st.session_state:
+        st.write(f"- จำนวน sessions: {len(st.session_state.saved_sessions)}")
+        st.write(f"- Session keys: {list(st.session_state.saved_sessions.keys())}")
+    st.write("---")
+    
+    # Complete
+    progress_bar.progress(1.0)
+    status_text.text("✅ ประมวลผลเสร็จสิ้น!")
+    
+    # Store results in session state
     st.session_state.processing_results = results
     st.session_state.processing_summary = service.get_processing_summary()
-    st.session_state.recon_system = service.recon_system  # เพิ่มบรรทัดนี้!
+    st.session_state.session_file = session_file
     
-    st.success(f"✅ สำเร็จ! PDF: {success}, รายการ: {len(results) if results is not None else 0}")
+    # Show success message
+    st.success(f"""
+    ✅ **ประมวลผลสำเร็จ!**
     
-    time.sleep(1)
+    - PDF สำเร็จ: {success} ไฟล์
+    - PDF ล้มเหลว: {fail} ไฟล์
+    - จำนวนรายการ: {len(results) if results is not None else 0}
+    
+    💡 **ตอนนี้สามารถไปหน้า "For Auditor" เพื่อดู Dashboard ได้แล้ว!**
+    """)
+    
+    time.sleep(2)
     st.rerun()
 
 
 def show_results_section():
-    """แสดงผลลัพธ์"""
-    st.markdown("---")
-    st.markdown("### 📊 ผลลัพธ์")
+    """ส่วนแสดงผลลัพธ์"""
+    st.markdown("### 📊 ผลลัพธ์การประมวลผล")
     
-    results = st.session_state.get('processing_results')
-    summary = st.session_state.get('processing_summary', {})
-    
-    if results is None:
-        st.info("ℹ️ ยังไม่มีผลลัพธ์")
+    if 'processing_results' not in st.session_state:
+        st.info("ℹ️ ยังไม่มีผลลัพธ์ กรุณาประมวลผลข้อมูลก่อน")
         return
     
-    # Metrics
+    results = st.session_state.processing_results
+    summary = st.session_state.processing_summary
+    
+    # Summary metrics
     col1, col2, col3, col4 = st.columns(4)
     
-    col1.metric("PDF", summary.get('pdfs_processed', 0))
-    col2.metric("รายการ", summary.get('total_records', 0))
+    with col1:
+        st.metric(
+            "PDF ประมวลผล",
+            summary.get('pdfs_processed', 0)
+        )
     
-    if 'total_should_collect' in summary:
-        col3.metric("ควรเก็บ", f"{summary['total_should_collect']:,.0f} ฿")
+    with col2:
+        st.metric(
+            "จำนวนรายการ",
+            summary.get('total_records', 0)
+        )
     
-    if 'total_actually_collected' in summary:
-        col4.metric("เก็บจริง", f"{summary['total_actually_collected']:,.0f} ฿")
+    with col3:
+        if 'total_should_collect' in summary:
+            st.metric(
+                "ยอดที่ควรเก็บ",
+                f"{summary['total_should_collect']:,.0f} บาท"
+            )
+    
+    with col4:
+        if 'total_actually_collected' in summary:
+            st.metric(
+                "ยอดที่เก็บจริง",
+                f"{summary['total_actually_collected']:,.0f} บาท"
+            )
     
     st.markdown("---")
     
-    # Table
-    if len(results) > 0:
+    # Results table
+    st.markdown("#### 📋 รายละเอียดผลลัพธ์")
+    
+    if results is not None and len(results) > 0:
+        # Show data
         st.dataframe(results, use_container_width=True, height=400)
         
-        # Download
-        st.markdown("#### 💾 ดาวน์โหลด")
-        
-        # Import reporting service
-        from services.reporting_service import ReportingService
-        
-        reporter = ReportingService()
-        
-        # Get data from reconciliation system
-        recon_system = st.session_state.get('recon_system')
-        
-        if recon_system:
-            calculated = recon_system.calculated_allowances
-            summary = recon_system.generate_summary_report()
-        else:
-            calculated = None
-            summary = None
-        
-        # Generate Excel file in memory
-        excel_bytes = reporter.export_to_excel_bytes(
-            reconciliation_df=results,
-            calculated_df=calculated,
-            summary_df=summary
-        )
-        
-        # Generate filename
-        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"TTA_Reconciliation_{timestamp}.xlsx"
+        # Export options
+        st.markdown("#### 💾 Export รายงาน")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.download_button(
-                "📥 ดาวน์โหลด Excel",
-                data=excel_bytes,
-                file_name=filename,
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                use_container_width=True
-            )
+            if st.button("📥 ดาวน์โหลด Excel", use_container_width=True):
+                from services.reporting_service import ReportingService
+                reporter = ReportingService()
+                
+                excel_file = reporter.export_to_excel(
+                    results,
+                    filename=f"results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                )
+                
+                with open(excel_file, 'rb') as f:
+                    st.download_button(
+                        "💾 บันทึกไฟล์ Excel",
+                        data=f,
+                        file_name=os.path.basename(excel_file),
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    )
         
         with col2:
-            csv_bytes = reporter.export_to_csv_bytes(results)
-            csv_filename = f"TTA_Reconciliation_{timestamp}.csv"
-            
-            st.download_button(
-                "📥 ดาวน์โหลด CSV",
-                data=csv_bytes,
-                file_name=csv_filename,
-                mime='text/csv',
-                use_container_width=True
-            )
+            if st.button("📥 ดาวน์โหลด CSV", use_container_width=True):
+                csv = results.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    "💾 บันทึกไฟล์ CSV",
+                    data=csv,
+                    file_name=f"results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime='text/csv'
+                )
     else:
-        st.warning("⚠️ ไม่มีข้อมูล")
+        st.warning("⚠️ ไม่มีข้อมูลผลลัพธ์")
