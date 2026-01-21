@@ -227,6 +227,23 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
                 'ขาด': 'UNDER'
             }).fillna(results['status'])
         
+        # 🔥 FIX: Merge กับ calculated_allowances เพื่อได้ columns ครบ
+        if results is not None and hasattr(service.recon_system, 'calculated_allowances'):
+            calc_df = service.recon_system.calculated_allowances
+            
+            if calc_df is not None and not calc_df.empty:
+                # Merge เพื่อเอา division, department, purchase_amount, etc.
+                results = results.merge(
+                    calc_df[['tta_key', 'category_code', 'vendor_code', 'vendor_name',
+                             'division', 'department', 'purchase_amount', 'year',
+                             'rate_percent', 'fix_amount', 'calculation_type',
+                             'description', 'payment_terms']],
+                    on=['tta_key', 'category_code', 'vendor_code', 'vendor_name'],
+                    how='left'
+                )
+                
+                print(f"\n✅ Merged results - columns: {list(results.columns)}")
+        
         st.session_state.processing_results = results
         st.session_state.processing_summary = service.get_processing_summary()
         st.session_state.session_name = session_name
@@ -259,12 +276,12 @@ def format_number(value):
 def create_calculated_sheet(results):
     """Sheet 1: Calculated - คำนวณจากสัญญา"""
     
-    # คัดลอก columns ที่ต้องการ
-    columns_map = {
+    # Select และ rename columns
+    calculated_cols = {
         'vendor_code': 'vendor_code',
         'vendor_name': 'vendor_name',
-        'Division': 'division',  # จาก results
-        'Department': 'department',  # จาก results
+        'division': 'division',
+        'department': 'department',
         'tta_key': 'tta_key',
         'year': 'year',
         'purchase_amount': 'purchase_amount',
@@ -272,7 +289,7 @@ def create_calculated_sheet(results):
         'category_name': 'category_name',
         'rate_percent': 'rate_percent',
         'fix_amount': 'fix_amount',
-        'should_collect': 'calculated_amount',  # จาก should_collect
+        'should_collect': 'calculated_amount',  # ใช้ should_collect
         'calculation_type': 'calculation_type',
         'description': 'description',
         'payment_terms': 'payment_terms'
@@ -281,23 +298,28 @@ def create_calculated_sheet(results):
     # สร้าง DataFrame ใหม่
     df_data = {}
     
-    for src_col, dest_col in columns_map.items():
+    for src_col, dest_col in calculated_cols.items():
         if src_col in results.columns:
             df_data[dest_col] = results[src_col]
         else:
-            # ถ้าไม่มี column ให้ใส่ค่าว่าง
+            # Default values
             if dest_col == 'year':
                 df_data[dest_col] = 2023
+            elif dest_col in ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']:
+                df_data[dest_col] = 0
             else:
                 df_data[dest_col] = ''
     
     df = pd.DataFrame(df_data)
     
+    # Drop duplicates (บาง row อาจซ้ำจาก merge)
+    df = df.drop_duplicates(subset=['tta_key', 'category_code'], keep='first')
+    
     # Format numbers
     num_cols = ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']
     for col in num_cols:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) and str(x) != '' and str(x) != 'nan' else '')
+            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) and str(x) not in ['', 'nan', '0'] else '')
     
     return df
 
