@@ -155,9 +155,9 @@ if 'processing_results' in st.session_state:
         else:
             st.success("✅ ไม่มี vendor หาย!")
     
-    # แสดงตาราง
-    st.markdown("### 📋 ตารางผลลัพธ์:")
-    st.dataframe(results, use_container_width=True)
+        # แสดงตาราง
+        st.markdown("### 📋 ตารางผลลัพธ์:")
+        st.dataframe(results, use_container_width=True)
     else:
         st.warning("⚠️ ผลลัพธ์เป็น None หรือว่างเปล่า")
         st.info("💡 สาเหตุ: ไม่มี JSON ไฟล์ใดประมวลผลสำเร็จ")
