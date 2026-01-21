@@ -129,7 +129,8 @@ class TTADocumentAnalyzer:
           - **ถ้าเอกสารมี Department มากกว่า 1 ตัว:**
             ให้เลือก Department ที่ปรากฏบ่อยที่สุดหรือที่อยู่ใน main section
             
-
+          - **ห้ามใส่ค่า null/None:**
+            ถ้าหาไม่เจอ Division หรือ Department → ให้ใส่ "00" แทน
             
         2. สกัดข้อมูล allowance แต่ละประเภทพร้อมเงื่อนไข โดยจัดหมวดหมู่ตามรายการนี้:
 
@@ -162,14 +163,20 @@ class TTADocumentAnalyzer:
         - บางไฟล์อาจจะมีเอกสารมากกว่า 2 หน้า ให้อ่านและสรุปข้อมูลเฉพาะ หน้า 1 และ 2 เท่านั้น หน้าอื่นไม่ต้องสนใจ
         
         **กฎ JSON Format (สำคัญมาก!):**
+        - **CRITICAL: ตรวจสอบ JSON ให้ valid 100% ก่อนส่ง!**
         - **ใช้ภาษาอังกฤษใน JSON เท่านั้น** - ห้ามใช้ภาษาไทย ห้ามใช้ตัวอักษรพิเศษ
-        - Description, category_name, payment_terms ต้องเป็นภาษาอังกฤษทั้งหมด
+        - Description, category_name, payment_terms ต้องเป็นภาษาอังกฤษทั้งหมด (ห้ามใช้ไทย!)
+        - **ทุก string value ต้องมี opening quote และ closing quote ครบ!**
         - ใช้ double quotes สำหรับ keys และ string values เท่านั้น
-        - ถ้ามี double quote ในข้อความ ให้แปลงเป็น single quote แทน
+        - ถ้ามี double quote ในข้อความ ให้ใช้ backslash escape: \"
+        - ถ้า value เป็น null ให้ใส่ null ไม่ใช่ "null"
         - ห้ามใส่ comma หลังรายการสุดท้ายใน array หรือ object
         - ห้ามใส่ comments
-        - ห้ามใช้ special characters ที่ทำให้ JSON ผิด
+        - ห้ามใช้ special characters ที่ทำให้ JSON ผิด  
         - ห้ามใช้ newlines (\n) ใน string values
+        - **ตัวอย่าง JSON ที่ถูกต้อง:**
+          {{"key": "value"}}  ← ถูก
+          {{"key": "value}}   ← ผิด! ขาด closing quote
 
 
         Response ในรูปแบบ JSON เท่านั้น:
@@ -280,38 +287,106 @@ class TTADocumentAnalyzer:
             # 5. ลบ control characters
             raw_text = re.sub(r'[\x00-\x1F\x7F]', '', raw_text)
             
-            # 6. แก้ไข quotes ซ้อนใน description - ใช้วิธีที่ง่ายและ reliable กว่า
-            # แทนที่จะ parse character ให้ใช้ regex แบบ greedy + Unicode support
-            def fix_string_values(text):
-                """
-                แก้ quotes ซ้อนใน string values
-                หลักการ: หา string values ทั้งหมดแล้วแทนที่ quotes ภายในด้วย single quotes
-                """
-                def replace_inner_quotes(match):
-                    # match.group(0) = ทั้ง "key": "value"
-                    # match.group(1) = key name
-                    # match.group(2) = value
-                    key = match.group(1)
-                    value = match.group(2)
-                    
-                    # แทนที่ quotes ภายใน value ด้วย single quotes
-                    # แต่ต้องระวังไม่ให้แทนที่ escaped quotes
-                    value_fixed = value.replace('\\"', '___ESCAPED_QUOTE___')
-                    value_fixed = value_fixed.replace('"', "'")
-                    value_fixed = value_fixed.replace('___ESCAPED_QUOTE___', '\\"')
-                    
-                    return f'"{key}": "{value_fixed}"'
-                
-                # Pattern: "key_name": "value ที่อาจมี quotes และ Unicode"
-                # ใช้ [\s\S] แทน . เพื่อให้จับ newlines ได้ด้วย
-                # ใช้ non-greedy .*? เพื่อไม่ให้จับเกินไป
-                pattern = r'"([^"]+)":\s*"((?:[^"\\]|\\.)*)\"'
-                
-                result = re.sub(pattern, replace_inner_quotes, text)
-                return result
+            # 6. แก้ไข JSON ที่พัง - Multiple aggressive strategies
             
-            # ใช้ fix ที่ปลอดภัยกว่า
-            raw_text = fix_string_values(raw_text)
+            def aggressive_json_fix(text):
+                """แก้ JSON ที่พังด้วย multiple strategies"""
+                import re
+                
+                # Strategy 1: แก้ quotes ที่ขาด closing quote
+                # Pattern: "key": "value ตามด้วย , } ] โดยไม่มี closing quote
+                def add_missing_closing_quotes(t):
+                    result = []
+                    i = 0
+                    in_key = False
+                    in_value = False
+                    escape_next = False
+                    
+                    while i < len(t):
+                        char = t[i]
+                        
+                        # Handle escape
+                        if escape_next:
+                            result.append(char)
+                            escape_next = False
+                            i += 1
+                            continue
+                        
+                        if char == '\\':
+                            escape_next = True
+                            result.append(char)
+                            i += 1
+                            continue
+                        
+                        # Handle quotes
+                        if char == '"':
+                            result.append(char)
+                            
+                            if not in_key and not in_value:
+                                # เริ่ม key
+                                in_key = True
+                            elif in_key:
+                                # จบ key, เช็คว่าตามด้วย : หรือไม่
+                                if i+1 < len(t) and t[i+1] == ':':
+                                    in_key = False
+                                    # หลัง : จะเป็น value
+                                    # skip whitespace and colon
+                                    i += 1
+                                    result.append(':')
+                                    while i+1 < len(t) and t[i+1] in ' \t':
+                                        i += 1
+                                        result.append(' ')
+                                    # เช็คว่าหลัง : เป็น " หรือไม่
+                                    if i+1 < len(t) and t[i+1] == '"':
+                                        in_value = True
+                            elif in_value:
+                                # จบ value
+                                in_value = False
+                        elif char in [',', '}', ']'] and in_value:
+                            # ถ้ายังอยู่ใน value แต่เจอ , } ] แสดงว่าขาด closing quote
+                            result.append('"')  # เพิ่ม closing quote
+                            in_value = False
+                            result.append(char)
+                        else:
+                            result.append(char)
+                        
+                        i += 1
+                    
+                    # ถ้าจบแล้วยังเปิด value อยู่
+                    if in_value:
+                        result.append('"')
+                    
+                    return ''.join(result)
+                
+                # Strategy 2: แก้ quotes ซ้อน
+                def fix_nested_quotes(t):
+                    # หา "key": "value" pattern
+                    pattern = r'"([^"]+)":\s*"((?:[^"\\]|\\.)*)"'
+                    
+                    def replace(m):
+                        key = m.group(1)
+                        value = m.group(2)
+                        # แทนที่ quotes ภายใน
+                        value = value.replace('"', "'")
+                        return f'"{key}": "{value}"'
+                    
+                    return re.sub(pattern, replace, t)
+                
+                # Strategy 3: แก้ null values
+                def fix_nulls(t):
+                    # "key": "null" → "key": null
+                    t = re.sub(r':\s*"null"', ': null', t)
+                    return t
+                
+                # Apply strategies
+                text = fix_nulls(text)
+                text = add_missing_closing_quotes(text)
+                text = fix_nested_quotes(text)
+                
+                return text
+            
+            # Apply aggressive fix
+            raw_text = aggressive_json_fix(raw_text)
             
             print(f"✅ Step 2 SUCCESS: ได้รับคำตอบแล้ว")
             print(f"🔍 Cleaned JSON (first 200 chars): {raw_text[:200]}...")
