@@ -209,6 +209,30 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             progress_callback=update_analysis_progress
         )
         
+        # 🔍 DEBUG: เช็คว่า results เป็นอะไร
+        print(f"\n🔍 DEBUG: results type = {type(results)}")
+        print(f"🔍 DEBUG: results is None? {results is None}")
+        
+        if results is not None:
+            print(f"🔍 DEBUG: results shape = {results.shape}")
+            print(f"🔍 DEBUG: results columns = {list(results.columns)}")
+        else:
+            print("🔍 DEBUG: results is None - checking recon_system...")
+            
+            # เช็ค calculated_allowances
+            if hasattr(service.recon_system, 'calculated_allowances'):
+                calc = service.recon_system.calculated_allowances
+                print(f"🔍 DEBUG: calculated_allowances type = {type(calc)}")
+                if calc is not None:
+                    print(f"🔍 DEBUG: calculated_allowances shape = {calc.shape}")
+            
+            # เช็ค results
+            if hasattr(service.recon_system, 'results'):
+                recon_results = service.recon_system.results
+                print(f"🔍 DEBUG: recon_system.results type = {type(recon_results)}")
+                if recon_results is not None:
+                    print(f"🔍 DEBUG: recon_system.results shape = {recon_results.shape}")
+        
         progress_bar.progress(0.95)
         session_name = service.save_session()
         
@@ -218,8 +242,24 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
         status_text.metric("Status", "✅ Done")
         time_text.metric("Time", f"{elapsed_total}s")
         
+        # เช็คว่า results เป็น None หรือไม่
+        if results is None:
+            detail_box.error("❌ Processing completed but no results generated. Please check the logs.")
+            st.error("""
+            **Possible reasons:**
+            1. No TTA data found
+            2. No matching records between TTA and AP/AR
+            3. Error during reconciliation
+            
+            **Next steps:**
+            1. Check if PDF files were processed successfully
+            2. Verify AP/AR files contain matching vendor codes
+            3. Review processing logs above
+            """)
+            return
+        
         # แปลง Status เป็นภาษาอังกฤษ (เอา icon ออก)
-        if results is not None and 'status' in results.columns:
+        if 'status' in results.columns:
             results['status'] = results['status'].str.replace('✅ ', '').str.replace('❌ ', '').str.replace('⚠️ ', '')
             results['status'] = results['status'].map({
                 'ครบ': 'MATCH',
@@ -228,7 +268,7 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             }).fillna(results['status'])
         
         # 🔥 FIX: Merge กับ calculated_allowances เพื่อได้ columns ครบ
-        if results is not None and hasattr(service.recon_system, 'calculated_allowances'):
+        if hasattr(service.recon_system, 'calculated_allowances'):
             calc_df = service.recon_system.calculated_allowances
             
             if calc_df is not None and not calc_df.empty:
@@ -253,7 +293,18 @@ def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, sho
             'total_time': elapsed_total
         }
         
-        detail_box.success(f"✅ Complete! {len(results)} records in {elapsed_total}s")
+        # แสดง success message
+        detail_box.success(f"""
+        ✅ **Processing Complete**
+        
+        - **Processed:** {success} PDF(s)
+        - **Failed:** {fail} PDF(s)
+        - **Records Generated:** {len(results)}
+        - **Total Time:** {elapsed_total} seconds
+        - **Session ID:** {session_name}
+        
+        📊 Results are now available below.
+        """)
         
         time.sleep(2)
         st.rerun()
