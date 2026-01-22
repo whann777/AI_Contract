@@ -593,7 +593,19 @@ def show_results_section():
             st.session_state.mode = 'auditor'
             st.rerun()
     
-    results = st.session_state.processing_results
+    results = st.session_state.processing_results.copy()
+    
+    # 🔥 FIX 3: แปลง Status เป็นภาษาอังกฤษ
+    if 'status' in results.columns:
+        status_map = {
+            'ครบ': 'MATCH',
+            'ขาด': 'UNDER', 
+            'เกิน': 'OVER',
+            '✅ ครบ': 'MATCH',
+            '❌ ขาด': 'UNDER',
+            '⚠️ เกิน': 'OVER'
+        }
+        results['status'] = results['status'].replace(status_map)
     
     # Summary metrics
     col1, col2, col3 = st.columns(3)
@@ -608,59 +620,86 @@ def show_results_section():
     with col3:
         if 'should_collect' in results.columns:
             total = results['should_collect'].sum()
-            st.metric("💰 Should Collect", f"฿{total:,.0f}")
+            st.metric("💰 Should Collect", f"฿{total:,.2f}")  # 2 ทศนิยม
     
-    # 3 Tabs สำหรับ 3 Sheets
-    tab1, tab2, tab3 = st.tabs(["📊 Reconciliation", "🧮 Calculated", "📋 Summary"])
+    # 🔥 FIX 1: เรียงลำดับ Tab ใหม่ - Calculated เป็นชีทแรก
+    tab1, tab2, tab3 = st.tabs(["🧮 Calculated", "📊 Reconciliation", "📋 Summary"])
     
-    # Tab 1: Reconciliation (Main results)
+    # Tab 1: Calculated Allowances (ชีทแรก)
     with tab1:
-        st.markdown("#### Reconciliation Results")
-        st.info("เปรียบเทียบระหว่าง Calculated Allowances กับ AR ที่เรียกเก็บจริง")
-        
-        st.dataframe(
-            results,
-            use_container_width=True,
-            hide_index=True,
-            height=400
-        )
-    
-    # Tab 2: Calculated Allowances
-    with tab2:
         st.markdown("#### Calculated Allowances")
         st.info("Allowances ที่คำนวณได้จากสัญญา TTA")
         
         # Get calculated from service
         try:
-            from services.processing_service import ProcessingService
-            
-            # Try to get from session
+            calculated = None
             if hasattr(st.session_state, 'service'):
                 service = st.session_state.service
                 calculated = service.recon_system.calculated_allowances
-            else:
-                # Reconstruct from reconciliation results
-                calculated_cols = ['vendor_code', 'vendor_name', 'tta_key', 
-                                  'category_code', 'category_name', 'should_collect']
                 
-                if all(col in results.columns for col in calculated_cols):
-                    calculated = results[calculated_cols].copy()
-                    calculated = calculated.rename(columns={'should_collect': 'calculated_amount'})
+                if calculated is not None:
+                    calculated = calculated.copy()
+                    
+                    # 🔥 FIX 2: Format ตัวเลข - 2 ทศนิยม + comma
+                    number_cols = ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']
+                    for col in number_cols:
+                        if col in calculated.columns:
+                            calculated[col] = calculated[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+                    
+                    st.dataframe(
+                        calculated,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400
+                    )
                 else:
-                    calculated = None
-            
-            if calculated is not None and len(calculated) > 0:
-                st.dataframe(
-                    calculated,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=400
-                )
+                    st.warning("Calculated allowances not available")
             else:
                 st.warning("Calculated allowances not available")
                 
         except Exception as e:
             st.error(f"Could not load calculated data: {e}")
+    
+    # Tab 2: Reconciliation
+    with tab2:
+        st.markdown("#### Reconciliation Results")
+        st.info("เปรียบเทียบระหว่าง Calculated Allowances กับ AR ที่เรียกเก็บจริง")
+        
+        # 🔥 FIX 2: Format ตัวเลข
+        display_results = results.copy()
+        number_cols = ['should_collect', 'actually_collected', 'difference', 'variance_pct']
+        for col in number_cols:
+            if col in display_results.columns:
+                if col == 'variance_pct':
+                    display_results[col] = display_results[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "")
+                else:
+                    display_results[col] = display_results[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+        
+        # 🔥 FIX 3: ใส่สีให้ Status
+        def color_status(val):
+            if val == 'MATCH':
+                return 'background-color: #FFD700; color: black; font-weight: bold'  # Yellow
+            elif val == 'UNDER':
+                return 'background-color: #90EE90; color: black; font-weight: bold'  # Green
+            elif val == 'OVER':
+                return 'background-color: #FF6B6B; color: white; font-weight: bold'  # Red
+            return ''
+        
+        if 'status' in display_results.columns:
+            styled = display_results.style.applymap(color_status, subset=['status'])
+            st.dataframe(
+                styled,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+        else:
+            st.dataframe(
+                display_results,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
     
     # Tab 3: Vendor Summary
     with tab3:
@@ -668,7 +707,7 @@ def show_results_section():
         st.info("สรุปยอดรวมแต่ละ Vendor")
         
         if 'vendor_code' in results.columns and 'should_collect' in results.columns:
-            # Create summary
+            # Create summary (ใช้ข้อมูลดิบที่แปลง status แล้ว)
             summary = results.groupby(['vendor_code', 'vendor_name']).agg({
                 'should_collect': 'sum',
                 'actually_collected': 'sum' if 'actually_collected' in results.columns else 'sum',
@@ -678,23 +717,43 @@ def show_results_section():
                 summary['difference'] = summary['actually_collected'] - summary['should_collect']
                 summary['variance_pct'] = (summary['difference'] / summary['should_collect'] * 100).round(2)
                 
-                # Add status
+                # Add status (อังกฤษ)
                 def get_status(diff):
                     if abs(diff) < 1:
-                        return '✅ ครบ'
+                        return 'MATCH'
                     elif diff > 0:
-                        return '⚠️ เกิน'
+                        return 'OVER'
                     else:
-                        return '❌ ขาด'
+                        return 'UNDER'
                 
                 summary['status'] = summary['difference'].apply(get_status)
             
-            st.dataframe(
-                summary,
-                use_container_width=True,
-                hide_index=True,
-                height=400
-            )
+            # 🔥 FIX 2: Format ตัวเลข
+            display_summary = summary.copy()
+            number_cols = ['should_collect', 'actually_collected', 'difference', 'variance_pct']
+            for col in number_cols:
+                if col in display_summary.columns:
+                    if col == 'variance_pct':
+                        display_summary[col] = display_summary[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "")
+                    else:
+                        display_summary[col] = display_summary[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+            
+            # 🔥 FIX 3: ใส่สีให้ Status
+            if 'status' in display_summary.columns:
+                styled_summary = display_summary.style.applymap(color_status, subset=['status'])
+                st.dataframe(
+                    styled_summary,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
+            else:
+                st.dataframe(
+                    display_summary,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
         else:
             st.warning("Summary data not available")
     
@@ -707,20 +766,18 @@ def show_results_section():
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 
+                # 🔥 FIX 1: Calculated เป็นชีทแรก
                 # Sheet 1: Calculated Allowances
-                try:
-                    if hasattr(st.session_state, 'service'):
-                        service = st.session_state.service
-                        calc_data = service.recon_system.calculated_allowances
-                        if calc_data is not None:
-                            calc_data.to_excel(writer, sheet_name='Calculated', index=False)
-                except:
-                    pass
+                if hasattr(st.session_state, 'service'):
+                    service = st.session_state.service
+                    calc_data = service.recon_system.calculated_allowances
+                    if calc_data is not None:
+                        calc_data.to_excel(writer, sheet_name='Calculated', index=False)
                 
-                # Sheet 2: Reconciliation
+                # Sheet 2: Reconciliation (แปลง status แล้ว)
                 results.to_excel(writer, sheet_name='Reconciliation', index=False)
                 
-                # Sheet 3: Summary
+                # Sheet 3: Summary (แปลง status แล้ว)
                 if 'vendor_code' in results.columns:
                     summary.to_excel(writer, sheet_name='Summary', index=False)
             
