@@ -484,24 +484,68 @@ def run_analysis(json_folder, ap_file, ar_file, use_llm_validation):
         update_progress("📋 Loading processed data...", 0.1)
         
         json_files = list(json_folder.glob('*.json'))
+        
+        # Debug: Show what we found
+        st.write(f"🔍 Debug: Found {len(json_files)} JSON files in {json_folder}")
+        if json_files:
+            st.write(f"📂 Sample files: {[f.name for f in json_files[:3]]}")
+        
         tta_data = {}
+        loaded_count = 0
+        error_count = 0
         
         for json_file in json_files:
             try:
                 with open(json_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    
+                    # Support both uppercase and lowercase keys
                     vendor_key = data.get('vendor_code', '')
-                    div_code = data.get('division_code', '')
-                    dept_code = data.get('department_code', '')
+                    div_code = data.get('division_code', data.get('Division_code', ''))
+                    dept_code = data.get('department_code', data.get('Department_code', ''))
+                    
+                    # Debug first file
+                    if loaded_count == 0:
+                        st.write(f"📋 First file structure:")
+                        st.write(f"   - vendor_code: {vendor_key}")
+                        st.write(f"   - division_code: {div_code}")
+                        st.write(f"   - department_code: {dept_code}")
                     
                     if vendor_key and div_code and dept_code:
                         tta_key = f"{vendor_key}_{div_code}_{dept_code}"
                         tta_data[tta_key] = data
+                        loaded_count += 1
+                    else:
+                        error_count += 1
+                        if error_count <= 3:  # Show first 3 errors
+                            st.warning(f"⚠️ {json_file.name}: Missing keys (vendor={vendor_key}, div={div_code}, dept={dept_code})")
+                        
             except Exception as e:
-                st.warning(f"⚠️ Could not load {json_file.name}: {e}")
+                error_count += 1
+                if error_count <= 3:
+                    st.warning(f"⚠️ Could not load {json_file.name}: {e}")
+        
+        st.write(f"✅ Loaded: {loaded_count}/{len(json_files)} files")
         
         if not tta_data:
             st.error("❌ Could not load any JSON files")
+            st.info(f"""
+            **Debug Info:**
+            - Found {len(json_files)} JSON files
+            - Successfully loaded: {loaded_count}
+            - Errors: {error_count}
+            - Required fields: vendor_code, division_code (or Division_code), department_code (or Department_code)
+            """)
+            
+            # Show sample JSON structure
+            if json_files:
+                with st.expander("🔍 View sample JSON"):
+                    try:
+                        with open(json_files[0], 'r', encoding='utf-8') as f:
+                            sample = json.load(f)
+                            st.json(sample)
+                    except Exception as e:
+                        st.error(f"Could not read sample: {e}")
             return
         
         update_progress(f"✅ Loaded {len(tta_data)} contracts", 0.2)
