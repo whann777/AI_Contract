@@ -555,10 +555,11 @@ def run_analysis(json_folder, ap_file, ar_file, use_llm_validation):
         progress_bar.progress(1.0)
         status_text.empty()
         
-        # Store results
+        # Store results AND service in session state
         st.session_state.processing_results = results
         st.session_state.processing_summary = service.get_processing_summary()
         st.session_state.session_name = session_name
+        st.session_state.service = service  # 🔥 เก็บ service เพื่อเข้าถึง calculated_allowances
         
         st.success(f"""
         ✅ **Analysis Complete!**
@@ -578,7 +579,7 @@ def run_analysis(json_folder, ap_file, ar_file, use_llm_validation):
 
 
 def show_results_section():
-    """แสดงผลลัพธ์ 3 Sheets"""
+    """แสดงผลลัพธ์ 3 Sheets: Calculated, Reconciliation, Summary"""
     
     if 'processing_results' not in st.session_state or st.session_state.processing_results is None:
         return
@@ -607,13 +608,16 @@ def show_results_section():
     with col3:
         if 'should_collect' in results.columns:
             total = results['should_collect'].sum()
-            st.metric("💰 Total Amount", f"฿{total:,.0f}")
+            st.metric("💰 Should Collect", f"฿{total:,.0f}")
     
     # 3 Tabs สำหรับ 3 Sheets
-    tab1, tab2, tab3 = st.tabs(["📋 Detailed Results", "📊 TTA Summary", "🏢 Vendor Summary"])
+    tab1, tab2, tab3 = st.tabs(["📊 Reconciliation", "🧮 Calculated", "📋 Summary"])
     
+    # Tab 1: Reconciliation (Main results)
     with tab1:
-        st.markdown("#### Detailed Results (All Items)")
+        st.markdown("#### Reconciliation Results")
+        st.info("เปรียบเทียบระหว่าง Calculated Allowances กับ AR ที่เรียกเก็บจริง")
+        
         st.dataframe(
             results,
             use_container_width=True,
@@ -621,86 +625,113 @@ def show_results_section():
             height=400
         )
     
+    # Tab 2: Calculated Allowances
     with tab2:
-        st.markdown("#### TTA Summary")
-        if 'tta_key' in results.columns:
-            tta_summary = results.groupby(['tta_key', 'vendor_code', 'vendor_name']).agg({
-                'category_code': 'count',
-                'should_collect': 'sum',
-                'actually_collected': 'sum'
-            }).reset_index()
+        st.markdown("#### Calculated Allowances")
+        st.info("Allowances ที่คำนวณได้จากสัญญา TTA")
+        
+        # Get calculated from service
+        try:
+            from services.processing_service import ProcessingService
             
-            tta_summary.columns = ['TTA Key', 'Vendor Code', 'Vendor Name', 
-                                   'Total Items', 'Should Collect', 'Actually Collected']
-            tta_summary['Difference'] = tta_summary['Actually Collected'] - tta_summary['Should Collect']
+            # Try to get from session
+            if hasattr(st.session_state, 'service'):
+                service = st.session_state.service
+                calculated = service.recon_system.calculated_allowances
+            else:
+                # Reconstruct from reconciliation results
+                calculated_cols = ['vendor_code', 'vendor_name', 'tta_key', 
+                                  'category_code', 'category_name', 'should_collect']
+                
+                if all(col in results.columns for col in calculated_cols):
+                    calculated = results[calculated_cols].copy()
+                    calculated = calculated.rename(columns={'should_collect': 'calculated_amount'})
+                else:
+                    calculated = None
             
-            st.dataframe(
-                tta_summary,
-                use_container_width=True,
-                hide_index=True,
-                height=400
-            )
-        else:
-            st.info("TTA summary not available")
+            if calculated is not None and len(calculated) > 0:
+                st.dataframe(
+                    calculated,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
+            else:
+                st.warning("Calculated allowances not available")
+                
+        except Exception as e:
+            st.error(f"Could not load calculated data: {e}")
     
+    # Tab 3: Vendor Summary
     with tab3:
         st.markdown("#### Vendor Summary")
-        if 'vendor_code' in results.columns:
-            vendor_summary = results.groupby(['vendor_code', 'vendor_name']).agg({
-                'category_code': 'count',
+        st.info("สรุปยอดรวมแต่ละ Vendor")
+        
+        if 'vendor_code' in results.columns and 'should_collect' in results.columns:
+            # Create summary
+            summary = results.groupby(['vendor_code', 'vendor_name']).agg({
                 'should_collect': 'sum',
-                'actually_collected': 'sum'
+                'actually_collected': 'sum' if 'actually_collected' in results.columns else 'sum',
             }).reset_index()
             
-            vendor_summary.columns = ['Vendor Code', 'Vendor Name', 
-                                      'Total Categories', 'Should Collect', 'Actually Collected']
-            vendor_summary['Difference'] = vendor_summary['Actually Collected'] - vendor_summary['Should Collect']
-            
-            # Status
-            def get_status(diff):
-                if abs(diff) < 1:
-                    return 'MATCH'
-                elif diff > 0:
-                    return 'OVER'
-                else:
-                    return 'UNDER'
-            
-            vendor_summary['Status'] = vendor_summary['Difference'].apply(get_status)
+            if 'actually_collected' in results.columns:
+                summary['difference'] = summary['actually_collected'] - summary['should_collect']
+                summary['variance_pct'] = (summary['difference'] / summary['should_collect'] * 100).round(2)
+                
+                # Add status
+                def get_status(diff):
+                    if abs(diff) < 1:
+                        return '✅ ครบ'
+                    elif diff > 0:
+                        return '⚠️ เกิน'
+                    else:
+                        return '❌ ขาด'
+                
+                summary['status'] = summary['difference'].apply(get_status)
             
             st.dataframe(
-                vendor_summary,
+                summary,
                 use_container_width=True,
                 hide_index=True,
                 height=400
             )
         else:
-            st.info("Vendor summary not available")
+            st.warning("Summary data not available")
     
-    # Download button
+    # Download Excel (3 Sheets)
     if len(results) > 0:
-        from io import BytesIO
-        import pandas as pd
-        
-        # สร้าง Excel 3 sheets
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Sheet 1: Detailed
-            results.to_excel(writer, sheet_name='Detailed Results', index=False)
+        try:
+            from io import BytesIO
+            import pandas as pd
             
-            # Sheet 2: TTA Summary
-            if 'tta_key' in results.columns:
-                tta_summary.to_excel(writer, sheet_name='TTA Summary', index=False)
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                
+                # Sheet 1: Calculated Allowances
+                try:
+                    if hasattr(st.session_state, 'service'):
+                        service = st.session_state.service
+                        calc_data = service.recon_system.calculated_allowances
+                        if calc_data is not None:
+                            calc_data.to_excel(writer, sheet_name='Calculated', index=False)
+                except:
+                    pass
+                
+                # Sheet 2: Reconciliation
+                results.to_excel(writer, sheet_name='Reconciliation', index=False)
+                
+                # Sheet 3: Summary
+                if 'vendor_code' in results.columns:
+                    summary.to_excel(writer, sheet_name='Summary', index=False)
             
-            # Sheet 3: Vendor Summary
-            if 'vendor_code' in results.columns:
-                vendor_summary.to_excel(writer, sheet_name='Vendor Summary', index=False)
-        
-        output.seek(0)
-        
-        st.download_button(
-            label="📥 Download Full Results (Excel - 3 Sheets)",
-            data=output,
-            file_name=f"analysis_results_{st.session_state.get('session_name', 'export')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Excel (3 Sheets: Calculated, Reconciliation, Summary)",
+                data=output,
+                file_name=f"TTA_Reconciliation_{st.session_state.get('session_name', 'export')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Error creating Excel: {e}")
