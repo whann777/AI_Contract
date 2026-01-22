@@ -641,11 +641,13 @@ def show_results_section():
                 if calculated is not None:
                     calculated = calculated.copy()
                     
-                    # 🔥 FIX 2: Format ตัวเลข - 2 ทศนิยม + comma
+                    # 🔥 FIX 2: Format ตัวเลข - 2 ทศนิยม + comma (ใช้วิธีง่าย)
                     number_cols = ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']
                     for col in number_cols:
                         if col in calculated.columns:
-                            calculated[col] = calculated[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+                            calculated[col] = calculated[col].apply(
+                                lambda x: f"{x:,.2f}" if x is not None and str(x) != 'nan' else ""
+                            )
                     
                     st.dataframe(
                         calculated,
@@ -666,15 +668,21 @@ def show_results_section():
         st.markdown("#### Reconciliation Results")
         st.info("เปรียบเทียบระหว่าง Calculated Allowances กับ AR ที่เรียกเก็บจริง")
         
-        # 🔥 FIX 2: Format ตัวเลข
+        # 🔥 FIX 2: Format ตัวเลข (ใช้วิธีง่ายกว่า)
         display_results = results.copy()
         number_cols = ['should_collect', 'actually_collected', 'difference', 'variance_pct']
         for col in number_cols:
             if col in display_results.columns:
                 if col == 'variance_pct':
-                    display_results[col] = display_results[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "")
+                    # Format percentage
+                    display_results[col] = display_results[col].apply(
+                        lambda x: f"{x:,.2f}%" if x is not None and str(x) != 'nan' else ""
+                    )
                 else:
-                    display_results[col] = display_results[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+                    # Format number
+                    display_results[col] = display_results[col].apply(
+                        lambda x: f"{x:,.2f}" if x is not None and str(x) != 'nan' else ""
+                    )
         
         # 🔥 FIX 3: ใส่สีให้ Status
         def color_status(val):
@@ -729,15 +737,19 @@ def show_results_section():
                 
                 summary['status'] = summary['difference'].apply(get_status)
             
-            # 🔥 FIX 2: Format ตัวเลข
+            # 🔥 FIX 2: Format ตัวเลข (ใช้วิธีง่าย)
             display_summary = summary.copy()
             number_cols = ['should_collect', 'actually_collected', 'difference', 'variance_pct']
             for col in number_cols:
                 if col in display_summary.columns:
                     if col == 'variance_pct':
-                        display_summary[col] = display_summary[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "")
+                        display_summary[col] = display_summary[col].apply(
+                            lambda x: f"{x:,.2f}%" if x is not None and str(x) != 'nan' else ""
+                        )
                     else:
-                        display_summary[col] = display_summary[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+                        display_summary[col] = display_summary[col].apply(
+                            lambda x: f"{x:,.2f}" if x is not None and str(x) != 'nan' else ""
+                        )
             
             # 🔥 FIX 3: ใส่สีให้ Status
             if 'status' in display_summary.columns:
