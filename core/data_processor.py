@@ -58,7 +58,12 @@ class DataPreprocessor:
 
         # ทำความสะอาด vendor code
         if 'VndCode' in df.columns:
+            # แปลงเป็น string และลบ .0
             df['VndCode'] = df['VndCode'].astype(str).str.replace('.0', '').str.strip()
+            # 🔥 FIX: ให้เป็น 7 หลักเสมอ (เติม 0 ข้างหน้า)
+            df['VndCode'] = df['VndCode'].str.zfill(7)
+            print(f"   ✅ Cleaned VndCode (padded to 7 digits)")
+            print(f"      Sample: {df['VndCode'].head(3).tolist()}")
 
         # ลบ columns เก่าที่อาจจะชนกัน
         columns_to_drop = ['DIV_CODE', 'DEPT_CODE_FINAL', 'DEPT_CODE_STR']
@@ -128,7 +133,12 @@ class DataPreprocessor:
 
         # ทำความสะอาด supplier code
         if 'SUP_CODE' in df.columns:
+            # แปลงเป็น string และลบ .0
             df['SUP_CODE'] = df['SUP_CODE'].astype(str).str.replace('.0', '').str.strip()
+            # 🔥 FIX: ให้เป็น 7 หลักเสมอ (เติม 0 ข้างหน้า)
+            df['SUP_CODE'] = df['SUP_CODE'].str.zfill(7)
+            print(f"   ✅ Cleaned SUP_CODE (padded to 7 digits)")
+            print(f"      Sample: {df['SUP_CODE'].head(3).tolist()}")
 
         # แปลง DPTNBR (4 digit) เป็น Division และ Department
         if 'DPTNBR' in df.columns:
