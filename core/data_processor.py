@@ -40,6 +40,10 @@ class DataPreprocessor:
         print("\n🔧 กำลังเตรียมข้อมูล AP (ยอดซื้อ)...")
 
         df = df.copy()
+        
+        # 🔥 FIX: ลบ spaces ใน column names
+        df.columns = df.columns.str.strip()
+        print(f"\n✅ Cleaned column names (removed spaces)")
 
         # Debug: แสดง columns ทั้งหมด
         print(f"\n📋 Columns ใน AP CSV: {df.columns.tolist()}")
@@ -113,6 +117,10 @@ class DataPreprocessor:
         print("\n🔧 กำลังเตรียมข้อมูล AR (ยอดที่เรียกเก็บ)...")
 
         df = df.copy()
+        
+        # 🔥 FIX: ลบ spaces ใน column names
+        df.columns = df.columns.str.strip()
+        print(f"\n✅ Cleaned column names (removed spaces)")
 
         # Clean amount column
         if 'EXTENDED_AMOUNT' in df.columns:
