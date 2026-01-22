@@ -1,593 +1,436 @@
 """
-Analyze Mode UI - Final Version
-3 Sheets: Calculated, Reconciliation, Summary
-Status: English with colors only (no icons)
-Numbers: 2 decimals with comma separator
+Analyze Mode UI - แยก 2 Steps: Process PDFs / Analyze Data
 """
 
 import streamlit as st
 import os
 from pathlib import Path
 import time
-import pandas as pd
-from io import BytesIO
+import json
 
 from services.processing_service import ProcessingService
 from config.settings import DIRECTORIES
 
 
 def show_analyze_mode():
-    """แสดง UI สำหรับโหมด Analyze"""
+    """
+    แสดง UI สำหรับโหมด Analyze (แยกเป็น 2 ส่วน)
+    """
+    st.title("🔬 For Analyze: ประมวลผลสัญญาและข้อมูล")
     
-    # Header
-    st.markdown("""
-    <div style="background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-        <h1 style="color: white; margin: 0;">🔬 Analysis Mode</h1>
-        <p style="color: #e0e0e0; margin: 5px 0 0 0;">Trade Agreement Processing & Reconciliation System</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if st.button("← Back to Home", key="back_btn"):
+    # Back button
+    if st.button("← กลับหน้าแรก"):
         st.session_state.mode = None
         st.rerun()
     
     st.markdown("---")
     
-    show_system_status()
-    show_processing_controls()
-    show_results_section()
-
-
-def show_system_status():
-    """แสดงสถานะระบบ"""
-    
-    st.markdown("### 📊 System Status")
-    
-    api_key = ""
-    try:
-        if hasattr(st, 'secrets') and "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-    except Exception:
-        pass
-    
+    # Initialize session state
     if 'api_key' not in st.session_state:
-        st.session_state.api_key = api_key
+        st.session_state.api_key = ''
+    if 'processing_status' not in st.session_state:
+        st.session_state.processing_status = None
     
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        if st.session_state.api_key:
-            st.success("**AI Engine:** ✅ Connected")
-        else:
-            st.error("**AI Engine:** ❌ Not Connected")
-    
-    with col2:
-        if not st.session_state.api_key:
-            st.warning("⚠️ Gemini API Key required. Configure in Secrets.")
+    # แสดงสถานะไฟล์
+    show_file_status_section()
     
     st.markdown("---")
     
-    st.markdown("### 📁 Data Sources")
+    # ════════════════════════════════════════════════
+    # STEP 1: Process PDFs (ทำครั้งเดียว)
+    # ════════════════════════════════════════════════
+    show_step1_process_pdfs()
     
-    pdf_files = list(DIRECTORIES['agreements'].glob('*.pdf'))
-    ap_files = list(DIRECTORIES['ap'].glob('*.csv'))
-    ar_files = list(DIRECTORIES['ar'].glob('*.csv'))
+    st.markdown("---")
     
-    col1, col2, col3 = st.columns(3)
+    # ════════════════════════════════════════════════
+    # STEP 2: Analyze (ใช้ได้เรื่อยๆ)
+    # ════════════════════════════════════════════════
+    show_step2_analyze()
+
+
+def show_file_status_section():
+    """แสดงสถานะไฟล์ที่มีอยู่"""
+    st.markdown("### 📁 สถานะไฟล์ข้อมูล")
     
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Check PDF files
     with col1:
-        st.markdown("**📄 Trade Agreements (PDF)**")
+        pdf_folder = DIRECTORIES['agreements']
+        pdf_files = list(pdf_folder.glob('*.pdf'))
+        
+        st.markdown("#### 📄 PDF")
         if pdf_files:
-            st.info(f"**{len(pdf_files)}** files ready")
-            with st.expander("View Files"):
-                for idx, f in enumerate(pdf_files, 1):
-                    st.text(f"{idx}. {f.name}")
+            st.success(f"✅ {len(pdf_files)} ไฟล์")
         else:
-            st.error("No PDF files")
+            st.error("❌ ไม่พบ")
     
+    # Check JSON files (processed PDFs)
     with col2:
-        st.markdown("**💰 Account Payable (CSV)**")
-        if ap_files:
-            st.info(f"**{len(ap_files)}** file(s) ready")
+        json_folder = DIRECTORIES.get('tta_summaries', Path('data/tta_summaries'))
+        json_files = list(json_folder.glob('*.json'))
+        
+        st.markdown("#### 📋 JSON")
+        if json_files:
+            st.success(f"✅ {len(json_files)} ไฟล์")
         else:
-            st.error("No AP files")
+            st.warning("⚠️ ยังไม่มี")
     
+    # Check AP files
     with col3:
-        st.markdown("**📊 Account Receivable (CSV)**")
-        if ar_files:
-            st.info(f"**{len(ar_files)}** file(s) ready")
+        ap_folder = DIRECTORIES['ap']
+        ap_files = list(ap_folder.glob('*.csv'))
+        
+        st.markdown("#### 💰 AP")
+        if ap_files:
+            st.success(f"✅ {len(ap_files)} ไฟล์")
         else:
-            st.error("No AR files")
+            st.error("❌ ไม่พบ")
     
-    st.markdown("---")
+    # Check AR files
+    with col4:
+        ar_folder = DIRECTORIES['ar']
+        ar_files = list(ar_folder.glob('*.csv'))
+        
+        st.markdown("#### 📊 AR")
+        if ar_files:
+            st.success(f"✅ {len(ar_files)} ไฟล์")
+        else:
+            st.error("❌ ไม่พบ")
 
 
-def show_processing_controls():
-    """ส่วนควบคุม"""
+def show_step1_process_pdfs():
+    """Step 1: ประมวลผล PDF (ทำครั้งเดียว)"""
     
-    st.markdown("### ⚙️ Processing Configuration")
-    
-    if not st.session_state.get('api_key'):
-        st.error("❌ Cannot proceed without API Key.")
-        return
-    
-    pdf_files = list(DIRECTORIES['agreements'].glob('*.pdf'))
-    ap_files = list(DIRECTORIES['ap'].glob('*.csv'))
-    ar_files = list(DIRECTORIES['ar'].glob('*.csv'))
-    
-    if not pdf_files or not ap_files or not ar_files:
-        st.error("❌ Missing required files.")
-        return
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Options**")
-        use_llm = st.checkbox("Enable AI Validation", value=True)
-        show_images = st.checkbox("Show PDF Images", value=False)
-    
-    with col2:
-        st.markdown("**Rate Limiting**")
-        delay_seconds = st.slider(
-            "AI Request Delay (seconds)",
-            min_value=10,
-            max_value=60,
-            value=30,
-            step=5
-        )
-        st.caption(f"⏱️ **{delay_seconds}s** between requests")
-    
-    st.markdown("---")
-    
-    st.info(f"""
-    **Processing Plan:**
-    - {len(pdf_files)} PDFs → ~{len(pdf_files) * (delay_seconds + 30)}s
-    - Reconciliation with AP/AR data
-    """)
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🚀 Start Processing", type="primary", use_container_width=True):
-            run_processing(
+    with st.expander("📂 **STEP 1: Process PDF Files** (One-Time Setup)", expanded=False):
+        st.info("""
+        ℹ️ **ขั้นตอนนี้ทำครั้งเดียว** หรือเมื่อมีไฟล์ PDF ใหม่
+        
+        ระบบจะ:
+        1. อ่าน PDF ทั้งหมดใน `data/agreements/`
+        2. ประมวลผลด้วย AI (Gemini)
+        3. บันทึกผลเป็น JSON ใน `data/tta_summaries/`
+        
+        ⚠️ **ใช้เวลานาน:** ~30 วินาที/ไฟล์
+        """)
+        
+        # Check API Key
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY", "")
+        except Exception:
+            api_key = ""
+        
+        if 'api_key' not in st.session_state:
+            st.session_state.api_key = api_key
+        
+        if not st.session_state.api_key:
+            st.error("❌ ไม่พบ Gemini API Key")
+            st.info("""
+            💡 **วิธีตั้งค่า:**
+            1. Streamlit Cloud → Settings → Secrets
+            2. เพิ่ม: `GEMINI_API_KEY = "your-key"`
+            3. Save & Reboot
+            """)
+            return
+        
+        st.success("✅ Gemini API Key พร้อมใช้งาน")
+        
+        # Check files
+        pdf_files = list(DIRECTORIES['agreements'].glob('*.pdf'))
+        json_folder = DIRECTORIES.get('tta_summaries', Path('data/tta_summaries'))
+        json_files = list(json_folder.glob('*.json'))
+        
+        if not pdf_files:
+            st.error("❌ ไม่พบไฟล์ PDF ใน data/agreements/")
+            return
+        
+        # Show status
+        col1, col2 = st.columns(2)
+        col1.metric("PDF Files", len(pdf_files))
+        col2.metric("JSON Files", len(json_files))
+        
+        if len(json_files) == len(pdf_files):
+            st.success(f"✅ ประมวลผล PDF ครบแล้ว ({len(json_files)}/{len(pdf_files)})")
+            st.info("💡 สามารถข้ามไป **STEP 2** เพื่อ Analyze ได้เลย")
+        else:
+            st.warning(f"⚠️ ยังประมวลผลไม่ครบ ({len(json_files)}/{len(pdf_files)})")
+        
+        # Processing options
+        col1, col2 = st.columns(2)
+        with col1:
+            show_images = st.checkbox("แสดงภาพระหว่างประมวลผล", value=False)
+        with col2:
+            delay_seconds = st.number_input("Delay (วินาที)", min_value=0, max_value=60, value=30)
+        
+        # Process button
+        if st.button("🚀 Process PDFs", type="primary", key="process_pdfs"):
+            run_pdf_processing(
                 pdf_files=[str(f) for f in pdf_files],
-                ap_file=str(ap_files[0]),
-                ar_file=str(ar_files[0]),
                 api_key=st.session_state.api_key,
-                use_llm_validation=use_llm,
                 show_images=show_images,
                 delay_seconds=delay_seconds
             )
 
 
-def run_processing(pdf_files, ap_file, ar_file, api_key, use_llm_validation, show_images, delay_seconds):
-    """รันการประมวลผล"""
+def run_pdf_processing(pdf_files, api_key, show_images, delay_seconds):
+    """รันประมวลผล PDF"""
     
     service = ProcessingService(api_key)
     
-    st.markdown("---")
-    st.markdown("### 🔄 Processing Status")
-    
+    # Progress tracking
     progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    def update_progress(current, total, filename):
+        progress = current / total
+        progress_bar.progress(progress)
+        status_text.text(f"📄 Processing: {filename} ({current}/{total})")
+    
+    # Process
+    status_text.text("🔄 เริ่มประมวลผล PDF...")
+    success, fail = service.process_contracts(
+        pdf_files=pdf_files,
+        show_images=show_images,
+        delay_seconds=delay_seconds,
+        progress_callback=update_progress
+    )
+    
+    # Complete
+    progress_bar.progress(1.0)
+    status_text.empty()
+    
+    st.success(f"""
+    ✅ **ประมวลผล PDF เสร็จสิ้น!**
+    
+    - สำเร็จ: {success} ไฟล์
+    - ล้มเหลว: {fail} ไฟล์
+    
+    💡 **ตอนนี้สามารถไป STEP 2 เพื่อ Analyze ได้แล้ว!**
+    """)
+    
+    time.sleep(2)
+    st.rerun()
+
+
+def show_step2_analyze():
+    """Step 2: วิเคราะห์ข้อมูล (ทำได้เรื่อยๆ เร็ว!)"""
+    
+    st.markdown("### 📊 STEP 2: Analyze Data (Fast - Can Repeat)")
+    
+    st.info("""
+    ℹ️ **ขั้นตอนนี้ทำได้เรื่อยๆ** แม้เปลี่ยน AP/AR ก็ Analyze ใหม่ได้
+    
+    ระบบจะ:
+    1. โหลด JSON จาก `data/tta_summaries/` (เร็ว!)
+    2. โหลด AP/AR CSV
+    3. คำนวณและเปรียบเทียบ
+    4. แสดงผลลัพธ์
+    
+    ⏱️ **ใช้เวลา:** ~30-60 วินาที
+    """)
+    
+    # Check files
+    json_folder = DIRECTORIES.get('tta_summaries', Path('data/tta_summaries'))
+    json_files = list(json_folder.glob('*.json'))
+    ap_files = list(DIRECTORIES['ap'].glob('*.csv'))
+    ar_files = list(DIRECTORIES['ar'].glob('*.csv'))
+    
+    # Validate
+    if not json_files:
+        st.error("❌ ไม่พบไฟล์ JSON - กรุณาทำ STEP 1 ก่อน")
+        return
+    
+    if not ap_files:
+        st.error("❌ ไม่พบไฟล์ AP ใน data/ap/")
+        return
+    
+    if not ar_files:
+        st.error("❌ ไม่พบไฟล์ AR ใน data/ar/")
+        return
+    
+    # Show metrics
     col1, col2, col3 = st.columns(3)
-    status_text = col1.empty()
-    time_text = col2.empty()
-    current_file = col3.empty()
-    detail_box = st.empty()
+    col1.metric("JSON Files", len(json_files))
+    col2.metric("AP Files", len(ap_files))
+    col3.metric("AR Files", len(ar_files))
     
-    start_time = time.time()
+    # Options
+    use_llm_validation = st.checkbox(
+        "ใช้ AI ตรวจสอบความถูกต้อง",
+        value=True,
+        help="ใช้ LLM ตรวจสอบ AR data"
+    )
     
-    def update_pdf_progress(current, total, filename):
-        progress = current / total * 0.7
-        progress_bar.progress(progress)
-        elapsed = int(time.time() - start_time)
-        status_text.metric("Status", "Processing")
-        time_text.metric("Elapsed", f"{elapsed}s")
-        current_file.metric("Progress", f"{current}/{total}")
-        detail_box.info(f"📄 {filename}")
-    
-    def update_analysis_progress(stage, progress_value=0.5):
-        progress = 0.7 + (progress_value * 0.3)
-        progress_bar.progress(progress)
-        elapsed = int(time.time() - start_time)
-        status_text.metric("Status", "Analysis")
-        time_text.metric("Elapsed", f"{elapsed}s")
-        current_file.empty()
-        detail_box.info(f"🔍 {stage}")
-    
-    try:
-        success, fail = service.process_contracts(
-            pdf_files=pdf_files,
-            show_images=show_images,
-            delay_seconds=delay_seconds,
-            progress_callback=update_pdf_progress
+    # Analyze button
+    if st.button("🔍 Analyze", type="primary", key="analyze"):
+        run_analysis(
+            json_folder=json_folder,
+            ap_file=str(ap_files[0]),
+            ar_file=str(ar_files[0]),
+            use_llm_validation=use_llm_validation
         )
-        
-        results = service.run_full_analysis(
-            ap_file=ap_file,
-            ar_file=ar_file,
-            use_llm_validation=use_llm_validation,
-            progress_callback=update_analysis_progress
-        )
-        
-        # 🔍 DEBUG: เช็คว่า results เป็นอะไร
-        print(f"\n🔍 DEBUG: results type = {type(results)}")
-        print(f"🔍 DEBUG: results is None? {results is None}")
-        
-        if results is not None:
-            print(f"🔍 DEBUG: results shape = {results.shape}")
-            print(f"🔍 DEBUG: results columns = {list(results.columns)}")
-        else:
-            print("🔍 DEBUG: results is None - checking recon_system...")
-            
-            # เช็ค calculated_allowances
-            if hasattr(service.recon_system, 'calculated_allowances'):
-                calc = service.recon_system.calculated_allowances
-                print(f"🔍 DEBUG: calculated_allowances type = {type(calc)}")
-                if calc is not None:
-                    print(f"🔍 DEBUG: calculated_allowances shape = {calc.shape}")
-            
-            # เช็ค results
-            if hasattr(service.recon_system, 'results'):
-                recon_results = service.recon_system.results
-                print(f"🔍 DEBUG: recon_system.results type = {type(recon_results)}")
-                if recon_results is not None:
-                    print(f"🔍 DEBUG: recon_system.results shape = {recon_results.shape}")
-        
-        progress_bar.progress(0.95)
-        session_name = service.save_session()
-        
-        progress_bar.progress(1.0)
-        elapsed_total = int(time.time() - start_time)
-        
-        status_text.metric("Status", "✅ Done")
-        time_text.metric("Time", f"{elapsed_total}s")
-        
-        # เช็คว่า results เป็น None หรือไม่
-        if results is None:
-            detail_box.error("❌ Processing completed but no results generated. Please check the logs.")
-            st.error("""
-            **Possible reasons:**
-            1. No TTA data found
-            2. No matching records between TTA and AP/AR
-            3. Error during reconciliation
-            
-            **Next steps:**
-            1. Check if PDF files were processed successfully
-            2. Verify AP/AR files contain matching vendor codes
-            3. Review processing logs above
-            """)
+    
+    # Show results
+    show_results_section()
+
+
+def run_analysis(json_folder, ap_file, ar_file, use_llm_validation):
+    """รันการวิเคราะห์"""
+    
+    # Check API Key
+    api_key = st.session_state.get('api_key', '')
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY", "")
+        except Exception:
+            st.error("❌ ไม่พบ API Key")
             return
-        
-        # แปลง Status เป็นภาษาอังกฤษ (เอา icon ออก)
-        if 'status' in results.columns:
-            results['status'] = results['status'].str.replace('✅ ', '').str.replace('❌ ', '').str.replace('⚠️ ', '')
-            results['status'] = results['status'].map({
-                'ครบ': 'MATCH',
-                'เกิน': 'OVER',
-                'ขาด': 'UNDER'
-            }).fillna(results['status'])
-        
-        # 🔥 FIX: Merge กับ calculated_allowances เพื่อได้ columns ครบ
-        if hasattr(service.recon_system, 'calculated_allowances'):
-            calc_df = service.recon_system.calculated_allowances
-            
-            if calc_df is not None and not calc_df.empty:
-                # Merge เพื่อเอา division, department, purchase_amount, etc.
-                results = results.merge(
-                    calc_df[['tta_key', 'category_code', 'vendor_code', 'vendor_name',
-                             'division', 'department', 'purchase_amount', 'year',
-                             'rate_percent', 'fix_amount', 'calculation_type',
-                             'description', 'payment_terms']],
-                    on=['tta_key', 'category_code', 'vendor_code', 'vendor_name'],
-                    how='left'
-                )
+    
+    service = ProcessingService(api_key)
+    
+    # Progress tracking
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    def update_progress(stage, progress_value=None):
+        if progress_value is not None:
+            progress_bar.progress(progress_value)
+        status_text.text(f"⚙️ {stage}")
+    
+    # Load TTA from JSON (fast!)
+    status_text.text("📋 Loading JSON files...")
+    progress_bar.progress(0.1)
+    
+    json_files = list(json_folder.glob('*.json'))
+    tta_data = {}
+    
+    for json_file in json_files:
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                vendor_key = data.get('vendor_code', '')
+                div_code = data.get('division_code', '')
+                dept_code = data.get('department_code', '')
                 
-                print(f"\n✅ Merged results - columns: {list(results.columns)}")
+                if vendor_key and div_code and dept_code:
+                    tta_key = f"{vendor_key}_{div_code}_{dept_code}"
+                    tta_data[tta_key] = data
+        except Exception as e:
+            st.warning(f"⚠️ ไม่สามารถโหลด {json_file.name}: {e}")
+    
+    if not tta_data:
+        st.error("❌ ไม่สามารถโหลด JSON ได้")
+        return
+    
+    status_text.text(f"✅ โหลด JSON สำเร็จ: {len(tta_data)} รายการ")
+    progress_bar.progress(0.2)
+    
+    # Set TTA data to service
+    service.recon_system.tta_data = tta_data
+    
+    # Load AP
+    update_progress("โหลดข้อมูล AP...", 0.3)
+    ap_loaded = service.recon_system.load_ap_data(ap_file)
+    if not ap_loaded:
+        st.error("❌ ไม่สามารถโหลด AP ได้")
+        return
+    
+    # Load AR
+    update_progress("โหลดข้อมูล AR...", 0.4)
+    ar_loaded = service.recon_system.load_ar_data(ar_file)
+    
+    # Calculate allowances
+    update_progress("คำนวณ Allowances...", 0.6)
+    calculated = service.recon_system.calculate_allowances()
+    if calculated is None:
+        st.error("❌ ไม่สามารถคำนวณ Allowances ได้")
+        return
+    
+    # Reconcile with AR
+    if ar_loaded:
+        # Validate AR with LLM (optional)
+        if use_llm_validation:
+            update_progress("ตรวจสอบ AR ด้วย AI...", 0.7)
+            service.recon_system.validate_ar_with_llm(service.analyzer)
         
-        st.session_state.processing_results = results
-        st.session_state.processing_summary = service.get_processing_summary()
-        st.session_state.session_name = session_name
-        st.session_state.processing_stats = {
-            'success': success,
-            'fail': fail,
-            'total_time': elapsed_total
-        }
+        # Reconcile
+        update_progress("เปรียบเทียบกับ AR...", 0.8)
+        reconciliation = service.recon_system.reconcile_with_ar()
         
-        # แสดง success message
-        detail_box.success(f"""
-        ✅ **Processing Complete**
+        # Generate summary
+        summary = service.recon_system.generate_summary_report()
         
-        - **Processed:** {success} PDF(s)
-        - **Failed:** {fail} PDF(s)
-        - **Records Generated:** {len(results)}
-        - **Total Time:** {elapsed_total} seconds
-        - **Session ID:** {session_name}
-        
-        📊 Results are now available below.
-        """)
-        
-        time.sleep(2)
-        st.rerun()
-        
-    except Exception as e:
-        detail_box.error(f"❌ Error: {e}")
-        with st.expander("Details"):
-            import traceback
-            st.code(traceback.format_exc())
-
-
-def format_number(value):
-    """Format number: 2 decimals + comma"""
-    try:
-        return f"{float(value):,.2f}"
-    except:
-        return value
-
-
-def create_calculated_sheet(results):
-    """Sheet 1: Calculated - คำนวณจากสัญญา"""
+        results = reconciliation
+    else:
+        st.warning("⚠️ ไม่มีข้อมูล AR - แสดงเฉพาะ Calculated Allowances")
+        results = calculated
     
-    # Select และ rename columns
-    calculated_cols = {
-        'vendor_code': 'vendor_code',
-        'vendor_name': 'vendor_name',
-        'division': 'division',
-        'department': 'department',
-        'tta_key': 'tta_key',
-        'year': 'year',
-        'purchase_amount': 'purchase_amount',
-        'category_code': 'category_code',
-        'category_name': 'category_name',
-        'rate_percent': 'rate_percent',
-        'fix_amount': 'fix_amount',
-        'should_collect': 'calculated_amount',  # ใช้ should_collect
-        'calculation_type': 'calculation_type',
-        'description': 'description',
-        'payment_terms': 'payment_terms'
-    }
+    # Export
+    update_progress("Export รายงาน...", 0.9)
+    output_file = service.recon_system.export_results()
     
-    # สร้าง DataFrame ใหม่
-    df_data = {}
+    # Save session
+    session_name = service.save_session()
     
-    for src_col, dest_col in calculated_cols.items():
-        if src_col in results.columns:
-            df_data[dest_col] = results[src_col]
-        else:
-            # Default values
-            if dest_col == 'year':
-                df_data[dest_col] = 2023
-            elif dest_col in ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']:
-                df_data[dest_col] = 0
-            else:
-                df_data[dest_col] = ''
+    # Complete
+    progress_bar.progress(1.0)
+    status_text.empty()
     
-    df = pd.DataFrame(df_data)
+    # Store results
+    st.session_state.processing_results = results
+    st.session_state.processing_summary = service.get_processing_summary()
+    st.session_state.session_name = session_name
     
-    # Drop duplicates (บาง row อาจซ้ำจาก merge)
-    df = df.drop_duplicates(subset=['tta_key', 'category_code'], keep='first')
+    st.success(f"""
+    ✅ **วิเคราะห์เสร็จสิ้น!**
     
-    # Format numbers
-    num_cols = ['purchase_amount', 'rate_percent', 'fix_amount', 'calculated_amount']
-    for col in num_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) and str(x) not in ['', 'nan', '0'] else '')
+    - จำนวนรายการ: {len(results) if results is not None else 0}
+    - ไฟล์รายงาน: {output_file}
     
-    return df
-
-
-def create_reconciliation_sheet(results):
-    """Sheet 2: Reconciliation - เปรียบเทียบ"""
-    recon_data = []
+    💡 **ตอนนี้สามารถไปหน้า "For Auditor" เพื่อดู Dashboard ได้แล้ว!**
+    """)
     
-    for _, row in results.iterrows():
-        recon_data.append({
-            'tta_key': row.get('tta_key', ''),
-            'vendor_code': row.get('vendor_code', ''),
-            'vendor_name': row.get('vendor_name', ''),
-            'category_code': row.get('category_code', ''),
-            'category_name': row.get('category_name', ''),
-            'should_collect': row.get('should_collect', 0),
-            'actually_collected': row.get('actually_collected', 0),
-            'difference': row.get('difference', 0),
-            'status': row.get('status', ''),
-            'variance_pct': row.get('variance_pct', 0)
-        })
-    
-    df = pd.DataFrame(recon_data)
-    
-    # Format numbers
-    num_cols = ['should_collect', 'actually_collected', 'difference', 'variance_pct']
-    for col in num_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) else '')
-    
-    return df
-
-
-def create_summary_sheet(results):
-    """Sheet 3: Summary - สรุปต่อ Vendor"""
-    summary_data = []
-    
-    if 'vendor_code' in results.columns:
-        for vendor in results['vendor_code'].unique():
-            vendor_data = results[results['vendor_code'] == vendor]
-            
-            should = vendor_data['should_collect'].sum() if 'should_collect' in vendor_data.columns else 0
-            actually = vendor_data['actually_collected'].sum() if 'actually_collected' in vendor_data.columns else 0
-            diff = vendor_data['difference'].sum() if 'difference' in vendor_data.columns else 0
-            
-            # Status
-            if diff == 0:
-                status = 'MATCH'
-            elif diff > 0:
-                status = 'OVER'
-            else:
-                status = 'UNDER'
-            
-            # Variance %
-            variance = (diff / should * 100) if should != 0 else 0
-            
-            summary_data.append({
-                'vendor_code': vendor,
-                'vendor_name': vendor_data['vendor_name'].iloc[0] if 'vendor_name' in vendor_data.columns else '',
-                'should_collect': should,
-                'actually_collected': actually,
-                'difference': diff,
-                'status': status,
-                'variance_pct': variance
-            })
-    
-    df = pd.DataFrame(summary_data)
-    
-    # Format numbers
-    num_cols = ['should_collect', 'actually_collected', 'difference', 'variance_pct']
-    for col in num_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) else '')
-    
-    return df
-
-
-def export_excel_3sheets(results):
-    """Export Excel 3 sheets ตามรูปแบบไฟล์ตัวอย่าง"""
-    output = BytesIO()
-    
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Sheet 1: Calculated
-        calc_df = create_calculated_sheet(results)
-        calc_df.to_excel(writer, sheet_name='Calculated', index=False)
-        
-        # Sheet 2: Reconciliation
-        recon_df = create_reconciliation_sheet(results)
-        recon_df.to_excel(writer, sheet_name='Reconciliation', index=False)
-        
-        # Sheet 3: Summary
-        summary_df = create_summary_sheet(results)
-        summary_df.to_excel(writer, sheet_name='Summary', index=False)
-    
-    output.seek(0)
-    return output
+    time.sleep(2)
+    st.rerun()
 
 
 def show_results_section():
     """แสดงผลลัพธ์"""
     
-    st.markdown("---")
-    st.markdown("### 📊 Analysis Results")
-    
     if 'processing_results' not in st.session_state or st.session_state.processing_results is None:
-        st.info("ℹ️ No results yet. Run processing first.")
         return
     
+    st.markdown("---")
+    st.markdown("### 📊 ผลลัพธ์")
+    
     results = st.session_state.processing_results
-    stats = st.session_state.get('processing_stats', {})
+    summary = st.session_state.get('processing_summary', {})
     
-    # 🔍 DEBUG: แสดง columns ที่มี
-    with st.expander("🔍 Debug: Available Columns"):
-        st.write(f"**Columns in results:** {list(results.columns)}")
-        st.write(f"**Shape:** {results.shape}")
-        st.write(f"**Sample data:**")
-        st.dataframe(results.head(3))
-    
-    # Summary Metrics
-    st.markdown("#### 📈 Processing Summary")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    col1.metric("📄 Files", stats.get('success', 0))
-    
-    if stats.get('fail', 0) > 0:
-        col2.metric("❌ Failed", stats.get('fail', 0))
-    else:
-        col2.metric("✅ Success", "100%")
-    
-    col3.metric("📊 Records", len(results))
-    col4.metric("⏱️ Time", f"{stats.get('total_time', 0)}s")
-    
-    st.markdown("---")
-    
-    # 3 Tabs
-    tab1, tab2, tab3 = st.tabs(["📋 Calculated", "🔍 Reconciliation", "📊 Summary"])
-    
-    with tab1:
-        st.markdown("#### 📋 Calculated (From TTA)")
-        calc_df = create_calculated_sheet(results)
-        
-        if len(calc_df) > 0:
-            st.dataframe(calc_df, use_container_width=True, height=500)
-        else:
-            st.info("No data")
-    
-    with tab2:
-        st.markdown("#### 🔍 Reconciliation (Comparison)")
-        recon_df = create_reconciliation_sheet(results)
-        
-        if len(recon_df) > 0:
-            # Color only Status column
-            def color_status(val):
-                if val == 'MATCH':
-                    return 'background-color: #FFD700; color: black'  # Yellow
-                elif val == 'OVER':
-                    return 'background-color: #FF6B6B; color: white'  # Red
-                elif val == 'UNDER':
-                    return 'background-color: #4ECDC4; color: white'  # Teal
-                return ''
-            
-            # Apply color to Status column only
-            styled_df = recon_df.style.applymap(color_status, subset=['status'])
-            
-            st.dataframe(styled_df, use_container_width=True, height=500)
-        else:
-            st.info("No data")
-    
-    with tab3:
-        st.markdown("#### 📊 Summary (By Vendor)")
-        summary_df = create_summary_sheet(results)
-        
-        if len(summary_df) > 0:
-            # Color Status column
-            def color_status(val):
-                if val == 'MATCH':
-                    return 'background-color: #FFD700; color: black'
-                elif val == 'OVER':
-                    return 'background-color: #FF6B6B; color: white'
-                elif val == 'UNDER':
-                    return 'background-color: #4ECDC4; color: white'
-                return ''
-            
-            styled_summary = summary_df.style.applymap(color_status, subset=['status'])
-            
-            st.dataframe(styled_summary, use_container_width=True, height=500)
-        else:
-            st.info("No data")
-    
-    # Export
-    st.markdown("---")
-    st.markdown("#### 💾 Export")
-    
+    # Summary metrics
     col1, col2, col3 = st.columns(3)
     
-    with col1:
+    col1.metric("จำนวนรายการ", len(results))
+    col2.metric("Vendors", results['vendor_code'].nunique() if len(results) > 0 else 0)
+    
+    if 'should_collect' in results.columns:
+        total_should = results['should_collect'].sum()
+        col3.metric("ยอดรวมที่ควรเรียกเก็บ", f"{total_should:,.0f}")
+    
+    # Show results table
+    st.markdown("#### 📋 ตารางผลลัพธ์ (แสดง 20 แถวแรก)")
+    st.dataframe(
+        results.head(20),
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Download button
+    if len(results) > 0:
         csv = results.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            "📥 CSV (Raw)",
+            label="📥 ดาวน์โหลด CSV",
             data=csv,
             file_name=f"results_{st.session_state.get('session_name', 'export')}.csv",
-            mime="text/csv",
-            use_container_width=True
+            mime="text/csv"
         )
-    
-    with col2:
-        excel_buffer = export_excel_3sheets(results)
-        st.download_button(
-            "📊 Excel (3 Sheets)",
-            data=excel_buffer,
-            file_name=f"TTA_Reconciliation_{st.session_state.get('session_name', 'export')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    
-    with col3:
-        if st.button("📋 Dashboard", use_container_width=True):
-            st.session_state.mode = 'auditor'
-            st.rerun()
