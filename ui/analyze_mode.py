@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 import json
 import traceback
+import pandas as pd  # 🔥 เพิ่ม pandas
 
 # Safe imports with error handling
 try:
