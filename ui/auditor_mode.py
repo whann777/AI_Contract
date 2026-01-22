@@ -1,3 +1,5 @@
+# คัดลอกไฟล์นี้ไปแทนที่ ui/auditor_mode.py ใน repo จริงของคุณ
+
 """
 Auditor Dashboard - PRA Framework (Problem → Reason → Action)
 Dashboard สำหรับผู้ตรวจสอบตามกรอบ PRA
@@ -283,8 +285,8 @@ def build_reason_tab(df):
                                                                 'fix_amount', 'payment_terms']].drop_duplicates()
                     df_analysis = df_analysis.merge(calc_type_df, on=merge_cols, how='left')
                     calc_type_available = True
-        except:
-            pass
+        except Exception as e:
+            st.warning(f"Could not load calculation details: {str(e)}")
     
     # Charts Row 1
     st.markdown("#### 📊 Category Analysis")
@@ -339,7 +341,7 @@ def build_reason_tab(df):
             pct_pct = (pct_count / len(df_analysis) * 100) if len(df_analysis) > 0 else 0
             st.info(f"💡 **Percentage-based:** {pct_count} records ({pct_pct:.1f}%)")
         else:
-            st.warning("⚠️ Calculation type not available - need calculated allowances data")
+            st.warning("⚠️ Calculation type not available - need to run analysis first")
     
     # Charts Row 2: Treemap
     st.markdown("---")
@@ -347,7 +349,7 @@ def build_reason_tab(df):
     
     if 'category_code' in df_analysis.columns and 'should_collect' in df_analysis.columns:
         # Prepare data for treemap
-        treemap_data = df_analysis.groupby(['category_code', 'category_name']).agg({
+        treemap_data = df_analysis.groupby(['category_code']).agg({
             'should_collect': 'sum'
         }).reset_index()
         
@@ -404,7 +406,7 @@ def build_reason_tab(df):
         
         st.caption(f"📊 Showing first 50 of {len(display_df)} records")
     else:
-        st.info("⚠️ Need calculated allowances data for full breakdown")
+        st.info("⚠️ Need to run analysis first to see full breakdown")
     
     # Insights Section
     st.markdown("---")
@@ -476,7 +478,7 @@ def build_reason_tab(df):
         
         st.success("✅ **AI-powered system แก้ปัญหานี้** โดยอัตโนมัติ - ทำใน 30 วินาที แทน 3 วัน!")
     else:
-        st.info("💡 ต้องมีข้อมูล calculated allowances เพื่อแสดง insights เต็มรูปแบบ")
+        st.info("💡 ต้องรัน analysis ก่อนเพื่อแสดง insights เต็มรูปแบบ")
 
 
 def build_action_tab(df):
