@@ -248,98 +248,235 @@ def build_reason_tab(df):
     """Tab 2: REASON - Why it happens?"""
     
     st.markdown("### 🔍 REASON: Why it happens?")
-    st.markdown("Breakdown analysis to understand root causes")
+    st.markdown("Root cause analysis - ทำไมถึงเกิดปัญหานี้")
     
-    # Category Breakdown
+    st.markdown("---")
+    st.markdown("#### 🎯 Key Questions to Answer")
+    
+    questions = [
+        "**Support แบบไหนคำนวณยาก?** - เห็น complexity ของแต่ละ category",
+        "**เป็น % หรือ Fix amount?** - ส่งผลต่อวิธีการตรวจสอบ",
+        "**ผูกกับ Purchase amount หรือไม่?** - ถ้าผูก ต้องเช็ค AP ให้ถูก",
+        "**Payment term (annual/other) ทำให้ delay หรือไม่?** - Annual เสี่ยงลืมเคลม"
+    ]
+    
+    for q in questions:
+        st.markdown(f"- {q}")
+    
+    st.markdown("---")
+    
+    # Detect calculation type from data
+    df_analysis = df.copy()
+    
+    # Try to get calculation type from service (if available)
+    calc_type_available = False
+    if hasattr(st.session_state, 'service'):
+        try:
+            service = st.session_state.service
+            calculated_df = service.recon_system.calculated_allowances
+            
+            if calculated_df is not None and 'calculation_type' in calculated_df.columns:
+                # Merge calculation_type into df_analysis
+                merge_cols = ['vendor_code', 'category_code']
+                if all(col in df_analysis.columns and col in calculated_df.columns for col in merge_cols):
+                    calc_type_df = calculated_df[merge_cols + ['calculation_type', 'rate_percent', 
+                                                                'fix_amount', 'payment_terms']].drop_duplicates()
+                    df_analysis = df_analysis.merge(calc_type_df, on=merge_cols, how='left')
+                    calc_type_available = True
+        except:
+            pass
+    
+    # Charts Row 1
+    st.markdown("#### 📊 Category Analysis")
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### Expected Support by Category")
-        if 'category_code' in df.columns and 'should_collect' in df.columns:
-            cat_summary = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False)
+        st.markdown("##### Expected Support by Category")
+        if 'category_code' in df_analysis.columns and 'should_collect' in df_analysis.columns:
+            cat_summary = df_analysis.groupby('category_code')['should_collect'].sum().sort_values(ascending=False)
             
-            fig = px.pie(
-                values=cat_summary.values,
-                names=cat_summary.index,
-                hole=0.4
+            # Bar chart (better than pie for many categories)
+            fig = px.bar(
+                x=cat_summary.values,
+                y=cat_summary.index,
+                orientation='h',
+                labels={'x': 'Total Expected (฿)', 'y': 'Category'},
+                color=cat_summary.values,
+                color_continuous_scale='Viridis'
             )
-            fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(height=400)
+            fig.update_layout(showlegend=False, height=400)
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Insight
+            top_cat = cat_summary.index[0] if len(cat_summary) > 0 else 'N/A'
+            top_pct = (cat_summary.iloc[0] / cat_summary.sum() * 100) if len(cat_summary) > 0 else 0
+            st.info(f"💡 **Top Category:** {top_cat} ({top_pct:.1f}% of total)")
         else:
             st.info("Data not available")
     
     with col2:
-        st.markdown("#### Status Distribution")
-        if 'status' in df.columns:
-            status_counts = df['status'].value_counts()
+        st.markdown("##### Calculation Type Distribution")
+        if calc_type_available and 'calculation_type' in df_analysis.columns:
+            calc_counts = df_analysis['calculation_type'].value_counts()
             
-            # Color by status
-            color_map = {
-                'MATCH': '#FFD700',
-                'UNDER': '#90EE90',
-                'OVER': '#FF6B6B'
-            }
-            colors = [color_map.get(s, '#CCCCCC') for s in status_counts.index]
-            
+            # Bar chart (better than donut when there are many types)
             fig = go.Figure(data=[go.Bar(
-                x=status_counts.index,
-                y=status_counts.values,
-                marker_color=colors
+                x=calc_counts.index,
+                y=calc_counts.values,
+                marker_color=['#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe'][:len(calc_counts)]
             )])
             fig.update_layout(
-                xaxis_title='Status',
+                xaxis_title='Calculation Type',
                 yaxis_title='Count',
                 showlegend=False,
                 height=400
             )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Insight
+            pct_based = df_analysis[df_analysis['calculation_type'].str.contains('%', na=False)]
+            pct_count = len(pct_based)
+            pct_pct = (pct_count / len(df_analysis) * 100) if len(df_analysis) > 0 else 0
+            st.info(f"💡 **Percentage-based:** {pct_count} records ({pct_pct:.1f}%)")
         else:
-            st.info("Data not available")
+            st.warning("⚠️ Calculation type not available - need calculated allowances data")
+    
+    # Charts Row 2: Treemap
+    st.markdown("---")
+    st.markdown("#### 🗺️ Category Treemap (Visual Hierarchy)")
+    
+    if 'category_code' in df_analysis.columns and 'should_collect' in df_analysis.columns:
+        # Prepare data for treemap
+        treemap_data = df_analysis.groupby(['category_code', 'category_name']).agg({
+            'should_collect': 'sum'
+        }).reset_index()
+        
+        if len(treemap_data) > 0:
+            fig = px.treemap(
+                treemap_data,
+                path=['category_code'],
+                values='should_collect',
+                color='should_collect',
+                color_continuous_scale='RdYlGn',
+                labels={'should_collect': 'Expected (฿)'}
+            )
+            fig.update_traces(textinfo="label+value+percent parent")
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.caption("💡 **ขนาดของกล่อง** = ยอดเงิน Expected | **สี** = ความเสี่ยง (แดง=สูง, เขียว=ต่ำ)")
     
     # Support Logic Breakdown Table
     st.markdown("---")
-    st.markdown("#### 📊 Support Logic Breakdown")
+    st.markdown("#### 📋 Support Logic Breakdown")
+    st.caption("🎯 **นี่คือจุดที่ IS project ดูเทพ** - เห็นรายละเอียดทุก category ว่าคำนวณยังไง")
     
-    # Select key columns
-    display_cols = []
-    for col in ['vendor_code', 'vendor_name', 'category_code', 'category_name', 
-                'should_collect', 'actually_collected', 'difference', 'status', 'variance_pct']:
-        if col in df.columns:
-            display_cols.append(col)
+    # Build comprehensive table
+    table_cols = ['category_code', 'category_name']
     
-    if display_cols:
+    if calc_type_available:
+        for col in ['calculation_type', 'rate_percent', 'fix_amount', 'payment_terms']:
+            if col in df_analysis.columns:
+                table_cols.append(col)
+    
+    # Add financial columns
+    for col in ['should_collect', 'actually_collected', 'difference', 'status']:
+        if col in df_analysis.columns:
+            table_cols.append(col)
+    
+    if len(table_cols) > 2:
+        # Group by category for summary view
+        display_df = df_analysis[table_cols].copy()
+        
+        # Format numbers for display
+        for col in ['rate_percent', 'fix_amount', 'should_collect', 'actually_collected', 'difference']:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(
+                    lambda x: f"{x:,.2f}" if x is not None and str(x) != 'nan' else ""
+                )
+        
         st.dataframe(
-            df[display_cols].head(100),  # Show first 100 rows
+            display_df.head(50),  # Show first 50 for performance
             use_container_width=True,
             hide_index=True,
             height=400
         )
+        
+        st.caption(f"📊 Showing first 50 of {len(display_df)} records")
+    else:
+        st.info("⚠️ Need calculated allowances data for full breakdown")
     
-    # Quick Insights
+    # Insights Section
     st.markdown("---")
-    st.markdown("#### 💡 Quick Insights")
+    st.markdown("#### 💡 Key Insights for Auditor")
     
-    insights = []
+    col1, col2 = st.columns(2)
     
-    # Top 3 categories
-    if 'category_code' in df.columns and 'should_collect' in df.columns:
-        top_cats = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False).head(3)
-        insights.append(f"**Top 3 Categories:** {', '.join(top_cats.index.tolist())}")
+    with col1:
+        st.markdown("**🎯 Calculation Complexity:**")
+        
+        if calc_type_available and 'calculation_type' in df_analysis.columns:
+            # Percentage-based
+            pct_based = df_analysis[df_analysis['calculation_type'].str.contains('%', na=False)]
+            pct_count = len(pct_based)
+            pct_amount = pct_based['should_collect'].sum() if 'should_collect' in pct_based.columns else 0
+            
+            st.markdown(f"- **อันไหนเป็น %:** {pct_count} records (฿{pct_amount:,.0f})")
+            st.markdown("  → ต้องพึ่ง AP (purchase amount ต้องถูก)")
+            
+            # Fixed-based
+            fix_based = df_analysis[df_analysis['calculation_type'].str.contains('Fix|fix|FIX', na=False)]
+            fix_count = len(fix_based)
+            fix_amount = fix_based['should_collect'].sum() if 'should_collect' in fix_based.columns else 0
+            
+            st.markdown(f"- **อันไหน Fix:** {fix_count} records (฿{fix_amount:,.0f})")
+            st.markdown("  → ต้องเช็คสัญญา (ตามที่ระบุใน TTA)")
+        else:
+            st.markdown("- ข้อมูล calculation type ไม่พร้อม")
     
-    # Under-collection rate
-    if 'status' in df.columns:
-        under_count = len(df[df['status'] == 'UNDER'])
-        under_pct = (under_count / len(df) * 100) if len(df) > 0 else 0
-        insights.append(f"**Under-collection Rate:** {under_pct:.1f}% ({under_count}/{len(df)} records)")
+    with col2:
+        st.markdown("**⏰ Payment Terms Risk:**")
+        
+        if calc_type_available and 'payment_terms' in df_analysis.columns:
+            # Annual terms
+            annual_df = df_analysis[df_analysis['payment_terms'].str.contains('annual|Annual|ANNUAL|yearly|Yearly', na=False)]
+            annual_count = len(annual_df)
+            annual_amount = annual_df['should_collect'].sum() if 'should_collect' in annual_df.columns else 0
+            
+            st.markdown(f"- **Annual terms:** {annual_count} records (฿{annual_amount:,.0f})")
+            st.markdown("  → เสี่ยงลืมเคลม (ปีละครั้ง)")
+            
+            # Quarterly/Monthly
+            frequent_df = df_analysis[df_analysis['payment_terms'].str.contains('quarter|Quarter|monthly|Monthly', na=False)]
+            frequent_count = len(frequent_df)
+            
+            st.markdown(f"- **Quarterly/Monthly:** {frequent_count} records")
+            st.markdown("  → เคลมบ่อย (ติดตามง่ายกว่า)")
+        else:
+            st.markdown("- ข้อมูล payment terms ไม่พร้อม")
     
-    # Avg variance
-    if 'variance_pct' in df.columns:
-        avg_var = df['variance_pct'].mean()
-        insights.append(f"**Average Variance:** {avg_var:.2f}%")
+    # Summary explanation
+    st.markdown("---")
+    st.markdown("#### 🔍 Why Manual Audit Takes So Long?")
     
-    for insight in insights:
-        st.markdown(f"- {insight}")
+    if calc_type_available:
+        total_types = df_analysis['calculation_type'].nunique() if 'calculation_type' in df_analysis.columns else 0
+        total_cats = df_analysis['category_code'].nunique() if 'category_code' in df_analysis.columns else 0
+        
+        reasons = [
+            f"**{total_cats} categories** แต่ละ category คำนวณคนละแบบ",
+            f"**{total_types} calculation types** ต้องเข้าใจ logic แต่ละแบบ",
+            "**Mix ระหว่าง % และ Fix amount** - ต้องเช็คทั้ง AP และสัญญา",
+            "**Payment terms ต่างกัน** - Annual/Quarterly/Monthly ต้องจำวันที่เคลม",
+            "**Manual reconciliation** ต้องเทียบทีละรายการ (no automation)"
+        ]
+        
+        for reason in reasons:
+            st.markdown(f"✗ {reason}")
+        
+        st.success("✅ **AI-powered system แก้ปัญหานี้** โดยอัตโนมัติ - ทำใน 30 วินาที แทน 3 วัน!")
+    else:
+        st.info("💡 ต้องมีข้อมูล calculated allowances เพื่อแสดง insights เต็มรูปแบบ")
 
 
 def build_action_tab(df):
