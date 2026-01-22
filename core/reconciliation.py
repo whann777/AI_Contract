@@ -115,7 +115,11 @@ class TTAReconciliationSystem:
                         'INVPAYAMT': 'sum',
                         'YEAR': 'first'
                     }).reset_index()
-                    print(summary.to_string(index=False))
+                    
+                    # แสดงแค่ 10 rows แรก เพื่อไม่ให้ logs ใหญ่เกิน
+                    print(f"   Total vendors: {len(summary)}")
+                    print(f"   Showing first 10 rows:")
+                    print(summary.head(10).to_string(index=False))
 
                     return True
                 except UnicodeDecodeError:
