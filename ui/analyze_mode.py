@@ -484,68 +484,27 @@ def run_analysis(json_folder, ap_file, ar_file, use_llm_validation):
         update_progress("📋 Loading processed data...", 0.1)
         
         json_files = list(json_folder.glob('*.json'))
-        
-        # Debug: Show what we found
-        st.write(f"🔍 Debug: Found {len(json_files)} JSON files in {json_folder}")
-        if json_files:
-            st.write(f"📂 Sample files: {[f.name for f in json_files[:3]]}")
-        
         tta_data = {}
-        loaded_count = 0
-        error_count = 0
         
         for json_file in json_files:
             try:
                 with open(json_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     
-                    # Support both uppercase and lowercase keys
+                    # 🔥 FIX: Support both uppercase and lowercase keys
                     vendor_key = data.get('vendor_code', '')
                     div_code = data.get('division_code', data.get('Division_code', ''))
                     dept_code = data.get('department_code', data.get('Department_code', ''))
                     
-                    # Debug first file
-                    if loaded_count == 0:
-                        st.write(f"📋 First file structure:")
-                        st.write(f"   - vendor_code: {vendor_key}")
-                        st.write(f"   - division_code: {div_code}")
-                        st.write(f"   - department_code: {dept_code}")
-                    
                     if vendor_key and div_code and dept_code:
                         tta_key = f"{vendor_key}_{div_code}_{dept_code}"
                         tta_data[tta_key] = data
-                        loaded_count += 1
-                    else:
-                        error_count += 1
-                        if error_count <= 3:  # Show first 3 errors
-                            st.warning(f"⚠️ {json_file.name}: Missing keys (vendor={vendor_key}, div={div_code}, dept={dept_code})")
                         
             except Exception as e:
-                error_count += 1
-                if error_count <= 3:
-                    st.warning(f"⚠️ Could not load {json_file.name}: {e}")
-        
-        st.write(f"✅ Loaded: {loaded_count}/{len(json_files)} files")
+                st.warning(f"⚠️ Could not load {json_file.name}: {e}")
         
         if not tta_data:
             st.error("❌ Could not load any JSON files")
-            st.info(f"""
-            **Debug Info:**
-            - Found {len(json_files)} JSON files
-            - Successfully loaded: {loaded_count}
-            - Errors: {error_count}
-            - Required fields: vendor_code, division_code (or Division_code), department_code (or Department_code)
-            """)
-            
-            # Show sample JSON structure
-            if json_files:
-                with st.expander("🔍 View sample JSON"):
-                    try:
-                        with open(json_files[0], 'r', encoding='utf-8') as f:
-                            sample = json.load(f)
-                            st.json(sample)
-                    except Exception as e:
-                        st.error(f"Could not read sample: {e}")
             return
         
         update_progress(f"✅ Loaded {len(tta_data)} contracts", 0.2)
@@ -619,12 +578,19 @@ def run_analysis(json_folder, ap_file, ar_file, use_llm_validation):
 
 
 def show_results_section():
-    """แสดงผลลัพธ์"""
+    """แสดงผลลัพธ์ 3 Sheets"""
     
     if 'processing_results' not in st.session_state or st.session_state.processing_results is None:
         return
     
     st.markdown("### 🎯 Analysis Results")
+    
+    # ปุ่มไป Dashboard
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("📊 Go to Dashboard", type="primary", use_container_width=True):
+            st.session_state.mode = 'auditor'
+            st.rerun()
     
     results = st.session_state.processing_results
     
@@ -643,21 +609,98 @@ def show_results_section():
             total = results['should_collect'].sum()
             st.metric("💰 Total Amount", f"฿{total:,.0f}")
     
-    # Data preview
-    st.markdown("#### 📋 Data Preview (First 20 rows)")
-    st.dataframe(
-        results.head(20),
-        use_container_width=True,
-        hide_index=True
-    )
+    # 3 Tabs สำหรับ 3 Sheets
+    tab1, tab2, tab3 = st.tabs(["📋 Detailed Results", "📊 TTA Summary", "🏢 Vendor Summary"])
+    
+    with tab1:
+        st.markdown("#### Detailed Results (All Items)")
+        st.dataframe(
+            results,
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
+    
+    with tab2:
+        st.markdown("#### TTA Summary")
+        if 'tta_key' in results.columns:
+            tta_summary = results.groupby(['tta_key', 'vendor_code', 'vendor_name']).agg({
+                'category_code': 'count',
+                'should_collect': 'sum',
+                'actually_collected': 'sum'
+            }).reset_index()
+            
+            tta_summary.columns = ['TTA Key', 'Vendor Code', 'Vendor Name', 
+                                   'Total Items', 'Should Collect', 'Actually Collected']
+            tta_summary['Difference'] = tta_summary['Actually Collected'] - tta_summary['Should Collect']
+            
+            st.dataframe(
+                tta_summary,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+        else:
+            st.info("TTA summary not available")
+    
+    with tab3:
+        st.markdown("#### Vendor Summary")
+        if 'vendor_code' in results.columns:
+            vendor_summary = results.groupby(['vendor_code', 'vendor_name']).agg({
+                'category_code': 'count',
+                'should_collect': 'sum',
+                'actually_collected': 'sum'
+            }).reset_index()
+            
+            vendor_summary.columns = ['Vendor Code', 'Vendor Name', 
+                                      'Total Categories', 'Should Collect', 'Actually Collected']
+            vendor_summary['Difference'] = vendor_summary['Actually Collected'] - vendor_summary['Should Collect']
+            
+            # Status
+            def get_status(diff):
+                if abs(diff) < 1:
+                    return 'MATCH'
+                elif diff > 0:
+                    return 'OVER'
+                else:
+                    return 'UNDER'
+            
+            vendor_summary['Status'] = vendor_summary['Difference'].apply(get_status)
+            
+            st.dataframe(
+                vendor_summary,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+        else:
+            st.info("Vendor summary not available")
     
     # Download button
     if len(results) > 0:
-        csv = results.to_csv(index=False).encode('utf-8-sig')
+        from io import BytesIO
+        import pandas as pd
+        
+        # สร้าง Excel 3 sheets
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Sheet 1: Detailed
+            results.to_excel(writer, sheet_name='Detailed Results', index=False)
+            
+            # Sheet 2: TTA Summary
+            if 'tta_key' in results.columns:
+                tta_summary.to_excel(writer, sheet_name='TTA Summary', index=False)
+            
+            # Sheet 3: Vendor Summary
+            if 'vendor_code' in results.columns:
+                vendor_summary.to_excel(writer, sheet_name='Vendor Summary', index=False)
+        
+        output.seek(0)
+        
         st.download_button(
-            label="📥 Download Full Results (CSV)",
-            data=csv,
-            file_name=f"analysis_results_{st.session_state.get('session_name', 'export')}.csv",
-            mime="text/csv",
+            label="📥 Download Full Results (Excel - 3 Sheets)",
+            data=output,
+            file_name=f"analysis_results_{st.session_state.get('session_name', 'export')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
