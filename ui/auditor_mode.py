@@ -217,13 +217,25 @@ def build_single_page_dashboard(df, calc_df):
     
     with col2:
         st.markdown("**Completion Ratio by Category**")
+        
+        # DEBUG: Check columns
+        st.caption(f"Columns available: {', '.join(df.columns[:5])}...")
+        st.caption(f"Total records: {len(df)}")
+        
         if 'category_code' in df.columns and 'should_collect' in df.columns and 'status' in df.columns:
+            # DEBUG: Show sample data
+            st.caption(f"Sample status values: {df['status'].unique()[:3]}")
+            
             # Step 1: Get top 10 categories (same as Category Breakdown)
             cat_summary = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False).head(10)
             top_categories = cat_summary.index.tolist()
             
+            st.caption(f"Top categories: {top_categories[:3]}...")
+            
             # Step 2: Filter to top categories
             df_top = df[df['category_code'].isin(top_categories)].copy()
+            
+            st.caption(f"Filtered records: {len(df_top)}")
             
             # Step 3: Translate status
             status_translation = {
@@ -236,80 +248,102 @@ def build_single_page_dashboard(df, calc_df):
             # Step 4: Group by category and status
             grouped = df_top.groupby(['category_code', 'status_en'])['should_collect'].sum().reset_index()
             
-            # Step 5: Pivot
-            pivot = grouped.pivot(
-                index='category_code',
-                columns='status_en',
-                values='should_collect'
-            ).fillna(0)
+            st.caption(f"Grouped rows: {len(grouped)}")
             
-            # Step 6: Reorder by top_categories (descending) and reverse for display
-            pivot = pivot.reindex(top_categories)
-            pivot = pivot.iloc[::-1]  # Reverse for bottom-to-top display
-            
-            # Step 7: Calculate percentages
-            pivot['total'] = pivot.sum(axis=1)
-            for col in ['MATCH', 'UNDER', 'OVER']:
-                if col in pivot.columns:
-                    pivot[f'{col}_pct'] = (pivot[col] / pivot['total'] * 100).fillna(0)
-            
-            # Step 8: Create chart
-            fig = go.Figure()
-            
-            # Add bars (order matters for stacking)
-            if 'MATCH_pct' in pivot.columns:
-                fig.add_trace(go.Bar(
-                    name='MATCH (ครบ)',
-                    y=pivot.index.tolist(),
-                    x=pivot['MATCH_pct'].tolist(),
-                    orientation='h',
-                    marker=dict(color='#FFD700'),
-                    text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['MATCH_pct']],
-                    textposition='inside',
-                    textfont=dict(color='black', size=11),
-                    hovertemplate='<b>%{y}</b><br>MATCH: %{x:.1f}%<extra></extra>'
-                ))
-            
-            if 'UNDER_pct' in pivot.columns:
-                fig.add_trace(go.Bar(
-                    name='UNDER (ขาด)',
-                    y=pivot.index.tolist(),
-                    x=pivot['UNDER_pct'].tolist(),
-                    orientation='h',
-                    marker=dict(color='#90EE90'),
-                    text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['UNDER_pct']],
-                    textposition='inside',
-                    textfont=dict(color='black', size=11),
-                    hovertemplate='<b>%{y}</b><br>UNDER: %{x:.1f}%<extra></extra>'
-                ))
-            
-            if 'OVER_pct' in pivot.columns:
-                fig.add_trace(go.Bar(
-                    name='OVER (เกิน)',
-                    y=pivot.index.tolist(),
-                    x=pivot['OVER_pct'].tolist(),
-                    orientation='h',
-                    marker=dict(color='#FF6B6B'),
-                    text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['OVER_pct']],
-                    textposition='inside',
-                    textfont=dict(color='white', size=11),
-                    hovertemplate='<b>%{y}</b><br>OVER: %{x:.1f}%<extra></extra>'
-                ))
-            
-            fig.update_layout(
-                barmode='stack',
-                xaxis_title="Completion Ratio (%)",
-                yaxis_title="Category",
-                xaxis=dict(range=[0, 100]),
-                height=350,
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=80, r=50, t=50, b=50)
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            if len(grouped) > 0:
+                # Show sample grouped data
+                with st.expander("🔍 Show grouped data"):
+                    st.dataframe(grouped.head(10))
+                
+                # Step 5: Pivot
+                pivot = grouped.pivot(
+                    index='category_code',
+                    columns='status_en',
+                    values='should_collect'
+                ).fillna(0)
+                
+                st.caption(f"Pivot shape: {pivot.shape}")
+                
+                if len(pivot) > 0:
+                    # Step 6: Reorder by top_categories (descending) and reverse for display
+                    pivot = pivot.reindex(top_categories)
+                    pivot = pivot.iloc[::-1]  # Reverse for bottom-to-top display
+                    
+                    # Step 7: Calculate percentages
+                    pivot['total'] = pivot.sum(axis=1)
+                    for col in ['MATCH', 'UNDER', 'OVER']:
+                        if col in pivot.columns:
+                            pivot[f'{col}_pct'] = (pivot[col] / pivot['total'] * 100).fillna(0)
+                    
+                    # Show pivot
+                    with st.expander("🔍 Show pivot table"):
+                        st.dataframe(pivot)
+                    
+                    # Step 8: Create chart
+                    fig = go.Figure()
+                    
+                    # Add bars (order matters for stacking)
+                    if 'MATCH_pct' in pivot.columns:
+                        fig.add_trace(go.Bar(
+                            name='MATCH (ครบ)',
+                            y=pivot.index.tolist(),
+                            x=pivot['MATCH_pct'].tolist(),
+                            orientation='h',
+                            marker=dict(color='#FFD700'),
+                            text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['MATCH_pct']],
+                            textposition='inside',
+                            textfont=dict(color='black', size=11),
+                            hovertemplate='<b>%{y}</b><br>MATCH: %{x:.1f}%<extra></extra>'
+                        ))
+                    
+                    if 'UNDER_pct' in pivot.columns:
+                        fig.add_trace(go.Bar(
+                            name='UNDER (ขาด)',
+                            y=pivot.index.tolist(),
+                            x=pivot['UNDER_pct'].tolist(),
+                            orientation='h',
+                            marker=dict(color='#90EE90'),
+                            text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['UNDER_pct']],
+                            textposition='inside',
+                            textfont=dict(color='black', size=11),
+                            hovertemplate='<b>%{y}</b><br>UNDER: %{x:.1f}%<extra></extra>'
+                        ))
+                    
+                    if 'OVER_pct' in pivot.columns:
+                        fig.add_trace(go.Bar(
+                            name='OVER (เกิน)',
+                            y=pivot.index.tolist(),
+                            x=pivot['OVER_pct'].tolist(),
+                            orientation='h',
+                            marker=dict(color='#FF6B6B'),
+                            text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['OVER_pct']],
+                            textposition='inside',
+                            textfont=dict(color='white', size=11),
+                            hovertemplate='<b>%{y}</b><br>OVER: %{x:.1f}%<extra></extra>'
+                        ))
+                    
+                    fig.update_layout(
+                        barmode='stack',
+                        xaxis_title="Completion Ratio (%)",
+                        yaxis_title="Category",
+                        xaxis=dict(range=[0, 100]),
+                        height=350,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        margin=dict(l=80, r=50, t=50, b=50)
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.error("❌ Pivot is empty - no data after pivot operation")
+            else:
+                st.error("❌ Grouped data is empty - check status values")
         else:
-            st.info("Need category_code, should_collect, and status columns")
+            missing = []
+            if 'category_code' not in df.columns: missing.append('category_code')
+            if 'should_collect' not in df.columns: missing.append('should_collect')
+            if 'status' not in df.columns: missing.append('status')
+            st.error(f"❌ Missing columns: {', '.join(missing)}")
     
     st.markdown("---")
     
