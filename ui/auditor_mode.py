@@ -155,23 +155,25 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Status Distribution**")
         if 'status' in df.columns and 'should_collect' in df.columns:
-            # Translate Thai to English first
-            df_temp = df.copy()
+            # Group first BEFORE translation
+            status_amounts = df.groupby('status')['should_collect'].sum()
+            
+            # Then translate index
             status_translation = {
                 'ครบ': 'MATCH',
                 'ขาด': 'UNDER', 
-                'เกิน': 'OVER'
+                'เกิน': 'OVER',
+                'MATCH': 'MATCH',
+                'UNDER': 'UNDER',
+                'OVER': 'OVER'
             }
-            df_temp['status'] = df_temp['status'].replace(status_translation)
+            status_amounts.index = status_amounts.index.map(lambda x: status_translation.get(x, x))
             
-            # Group by translated status
-            status_amounts = df_temp.groupby('status')['should_collect'].sum()
-            
-            # Ensure order: MATCH, UNDER, OVER
+            # Reindex to ensure order
             status_order = ['MATCH', 'UNDER', 'OVER']
             status_amounts = status_amounts.reindex(status_order, fill_value=0)
             
-            # Color mapping (MATCH=Yellow, UNDER=Green, OVER=Red)
+            # Color mapping
             color_map = {'MATCH': '#FFD700', 'UNDER': '#90EE90', 'OVER': '#FF6B6B'}
             colors = [color_map[s] for s in status_amounts.index]
             
@@ -180,8 +182,7 @@ def build_single_page_dashboard(df, calc_df):
                 y=status_amounts.values,
                 marker_color=colors,
                 text=[f"฿{x:,.0f}" for x in status_amounts.values],
-                textposition='outside',
-                showlegend=False
+                textposition='outside'
             )])
             
             fig.update_layout(
@@ -189,11 +190,7 @@ def build_single_page_dashboard(df, calc_df):
                 yaxis_title="Amount (฿)",
                 height=350,
                 showlegend=False,
-                margin=dict(l=50, r=50, t=30, b=50),
-                xaxis=dict(
-                    categoryorder='array',
-                    categoryarray=status_order
-                )
+                margin=dict(l=50, r=50, t=30, b=50)
             )
             st.plotly_chart(fig, use_container_width=True)
     
@@ -221,19 +218,22 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Diverging Stacked Bar by Category**")
         if 'category_code' in df.columns and 'difference' in df.columns and 'status' in df.columns:
-            # Translate status first
-            df_temp = df.copy()
-            status_translation = {'ครบ': 'MATCH', 'ขาด': 'UNDER', 'เกิน': 'OVER'}
-            df_temp['status'] = df_temp['status'].replace(status_translation)
+            # Group by category and status FIRST
+            cat_status = df.groupby(['category_code', 'status'])['difference'].sum().reset_index()
             
-            # Group by category and status - sum differences
-            cat_status = df_temp.groupby(['category_code', 'status'], as_index=False)['difference'].sum()
+            # Then translate status
+            status_translation = {
+                'ครบ': 'MATCH',
+                'ขาด': 'UNDER', 
+                'เกิน': 'OVER',
+                'MATCH': 'MATCH',
+                'UNDER': 'UNDER',
+                'OVER': 'OVER'
+            }
+            cat_status['status'] = cat_status['status'].map(lambda x: status_translation.get(x, x))
             
-            # Check if we have data
-            if len(cat_status) == 0:
-                st.info("No data available")
-            else:
-                # Pivot to create diverging structure
+            if len(cat_status) > 0:
+                # Pivot
                 pivot = cat_status.pivot_table(
                     index='category_code',
                     columns='status',
@@ -242,67 +242,72 @@ def build_single_page_dashboard(df, calc_df):
                     aggfunc='sum'
                 )
                 
-                # Calculate absolute total per category
-                pivot['total_abs'] = pivot.abs().sum(axis=1)
-                pivot = pivot.sort_values('total_abs', ascending=True)
-                pivot = pivot.tail(10).drop('total_abs', axis=1)
-                
-                # Create figure
-                fig = go.Figure()
-                
-                # UNDER (left - green)
-                if 'UNDER' in pivot.columns:
-                    fig.add_trace(go.Bar(
-                        name='UNDER',
-                        y=pivot.index,
-                        x=pivot['UNDER'],
-                        orientation='h',
-                        marker=dict(color='#90EE90'),
-                        text=[f"฿{abs(x):,.0f}" if abs(x) > 100 else "" for x in pivot['UNDER']],
-                        textposition='inside',
-                        textfont=dict(color='black', size=10)
-                    ))
-                
-                # MATCH (center - yellow)
-                if 'MATCH' in pivot.columns:
-                    fig.add_trace(go.Bar(
-                        name='MATCH',
-                        y=pivot.index,
-                        x=pivot['MATCH'],
-                        orientation='h',
-                        marker=dict(color='#FFD700'),
-                        text=[f"฿{abs(x):,.0f}" if abs(x) > 100 else "" for x in pivot['MATCH']],
-                        textposition='inside',
-                        textfont=dict(color='black', size=10)
-                    ))
-                
-                # OVER (right - red)
-                if 'OVER' in pivot.columns:
-                    fig.add_trace(go.Bar(
-                        name='OVER',
-                        y=pivot.index,
-                        x=pivot['OVER'],
-                        orientation='h',
-                        marker=dict(color='#FF6B6B'),
-                        text=[f"฿{abs(x):,.0f}" if abs(x) > 100 else "" for x in pivot['OVER']],
-                        textposition='inside',
-                        textfont=dict(color='white', size=10)
-                    ))
-                
-                fig.update_layout(
-                    barmode='relative',
-                    xaxis_title="Amount (฿)",
-                    yaxis_title="Category",
-                    height=350,
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    margin=dict(l=100, r=50, t=50, b=50)
-                )
-                
-                # Center line
-                fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="white", opacity=0.5)
-                
-                st.plotly_chart(fig, use_container_width=True)
+                # Sort and take top 10
+                if len(pivot) > 0:
+                    pivot['total_abs'] = pivot.abs().sum(axis=1)
+                    pivot = pivot.sort_values('total_abs', ascending=True)
+                    pivot = pivot.tail(10).drop('total_abs', axis=1)
+                    
+                    # Create figure
+                    fig = go.Figure()
+                    
+                    # UNDER (left - green)
+                    if 'UNDER' in pivot.columns:
+                        fig.add_trace(go.Bar(
+                            name='UNDER',
+                            y=pivot.index,
+                            x=pivot['UNDER'],
+                            orientation='h',
+                            marker=dict(color='#90EE90'),
+                            text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['UNDER']],
+                            textposition='inside',
+                            textfont=dict(color='black', size=10)
+                        ))
+                    
+                    # MATCH (center - yellow)
+                    if 'MATCH' in pivot.columns:
+                        fig.add_trace(go.Bar(
+                            name='MATCH',
+                            y=pivot.index,
+                            x=pivot['MATCH'],
+                            orientation='h',
+                            marker=dict(color='#FFD700'),
+                            text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['MATCH']],
+                            textposition='inside',
+                            textfont=dict(color='black', size=10)
+                        ))
+                    
+                    # OVER (right - red)
+                    if 'OVER' in pivot.columns:
+                        fig.add_trace(go.Bar(
+                            name='OVER',
+                            y=pivot.index,
+                            x=pivot['OVER'],
+                            orientation='h',
+                            marker=dict(color='#FF6B6B'),
+                            text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['OVER']],
+                            textposition='inside',
+                            textfont=dict(color='white', size=10)
+                        ))
+                    
+                    fig.update_layout(
+                        barmode='relative',
+                        xaxis_title="Amount (฿)",
+                        yaxis_title="Category",
+                        height=350,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        margin=dict(l=100, r=50, t=50, b=50)
+                    )
+                    
+                    # Center line
+                    fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="white", opacity=0.5)
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No data after pivot")
+            else:
+                st.info("No data available - run analysis first")
         else:
             st.info("Need category_code, difference, and status columns")
     
