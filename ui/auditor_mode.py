@@ -153,7 +153,7 @@ def build_single_page_dashboard(df, calc_df):
                 st.info("No leakage found")
     
     with col2:
-        st.markdown("**Status Distribution**")
+        st.markdown("**Status Distribution** `v2.0-count`")
         if 'status' in df.columns and 'should_collect' in df.columns:
             # Create working copy
             df_status = df.copy()
