@@ -218,26 +218,15 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Completion Ratio by Category**")
         
-        # DEBUG: Check columns
-        st.caption(f"Columns available: {', '.join(df.columns[:5])}...")
-        st.caption(f"Total records: {len(df)}")
-        
         if 'category_code' in df.columns and 'should_collect' in df.columns and 'status' in df.columns:
-            # DEBUG: Show sample data
-            st.caption(f"Sample status values: {df['status'].unique()[:3]}")
-            
-            # Step 1: Get top 10 categories (same as Category Breakdown)
+            # Step 1: Get top 10 categories
             cat_summary = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False).head(10)
             top_categories = cat_summary.index.tolist()
-            
-            st.caption(f"Top categories: {top_categories[:3]}...")
             
             # Step 2: Filter to top categories
             df_top = df[df['category_code'].isin(top_categories)].copy()
             
-            st.caption(f"Filtered records: {len(df_top)}")
-            
-            # Step 3: Translate status
+            # Step 3: Translate status FIRST
             status_translation = {
                 'ครบ': 'MATCH', 'MATCH': 'MATCH',
                 'ขาด': 'UNDER', 'UNDER': 'UNDER',
@@ -245,29 +234,24 @@ def build_single_page_dashboard(df, calc_df):
             }
             df_top['status_en'] = df_top['status'].map(lambda x: status_translation.get(x, x))
             
-            # Step 4: Group by category and status
+            # REMOVE icons if present
+            df_top['status_en'] = df_top['status_en'].str.replace('⚠️', '').str.replace('✅', '').str.replace('❌', '').str.strip()
+            
+            # Step 4: Group by category and status_en (NOT status!)
             grouped = df_top.groupby(['category_code', 'status_en'])['should_collect'].sum().reset_index()
             
-            st.caption(f"Grouped rows: {len(grouped)}")
-            
             if len(grouped) > 0:
-                # Show sample grouped data
-                with st.expander("🔍 Show grouped data"):
-                    st.dataframe(grouped.head(10))
-                
-                # Step 5: Pivot
+                # Step 5: Pivot using status_en
                 pivot = grouped.pivot(
                     index='category_code',
                     columns='status_en',
                     values='should_collect'
                 ).fillna(0)
                 
-                st.caption(f"Pivot shape: {pivot.shape}")
-                
                 if len(pivot) > 0:
-                    # Step 6: Reorder by top_categories (descending) and reverse for display
+                    # Step 6: Reorder
                     pivot = pivot.reindex(top_categories)
-                    pivot = pivot.iloc[::-1]  # Reverse for bottom-to-top display
+                    pivot = pivot.iloc[::-1]
                     
                     # Step 7: Calculate percentages
                     pivot['total'] = pivot.sum(axis=1)
@@ -275,51 +259,43 @@ def build_single_page_dashboard(df, calc_df):
                         if col in pivot.columns:
                             pivot[f'{col}_pct'] = (pivot[col] / pivot['total'] * 100).fillna(0)
                     
-                    # Show pivot
-                    with st.expander("🔍 Show pivot table"):
-                        st.dataframe(pivot)
-                    
                     # Step 8: Create chart
                     fig = go.Figure()
                     
-                    # Add bars (order matters for stacking)
                     if 'MATCH_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
-                            name='MATCH (ครบ)',
+                            name='MATCH',
                             y=pivot.index.tolist(),
                             x=pivot['MATCH_pct'].tolist(),
                             orientation='h',
                             marker=dict(color='#FFD700'),
                             text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['MATCH_pct']],
                             textposition='inside',
-                            textfont=dict(color='black', size=11),
-                            hovertemplate='<b>%{y}</b><br>MATCH: %{x:.1f}%<extra></extra>'
+                            textfont=dict(color='black', size=11)
                         ))
                     
                     if 'UNDER_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
-                            name='UNDER (ขาด)',
+                            name='UNDER',
                             y=pivot.index.tolist(),
                             x=pivot['UNDER_pct'].tolist(),
                             orientation='h',
                             marker=dict(color='#90EE90'),
                             text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['UNDER_pct']],
                             textposition='inside',
-                            textfont=dict(color='black', size=11),
-                            hovertemplate='<b>%{y}</b><br>UNDER: %{x:.1f}%<extra></extra>'
+                            textfont=dict(color='black', size=11)
                         ))
                     
                     if 'OVER_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
-                            name='OVER (เกิน)',
+                            name='OVER',
                             y=pivot.index.tolist(),
                             x=pivot['OVER_pct'].tolist(),
                             orientation='h',
                             marker=dict(color='#FF6B6B'),
                             text=[f"{x:.0f}%" if x > 5 else "" for x in pivot['OVER_pct']],
                             textposition='inside',
-                            textfont=dict(color='white', size=11),
-                            hovertemplate='<b>%{y}</b><br>OVER: %{x:.1f}%<extra></extra>'
+                            textfont=dict(color='white', size=11)
                         ))
                     
                     fig.update_layout(
@@ -335,15 +311,11 @@ def build_single_page_dashboard(df, calc_df):
                     
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.error("❌ Pivot is empty - no data after pivot operation")
+                    st.error("❌ Pivot is empty")
             else:
-                st.error("❌ Grouped data is empty - check status values")
+                st.error("❌ Grouped data is empty")
         else:
-            missing = []
-            if 'category_code' not in df.columns: missing.append('category_code')
-            if 'should_collect' not in df.columns: missing.append('should_collect')
-            if 'status' not in df.columns: missing.append('status')
-            st.error(f"❌ Missing columns: {', '.join(missing)}")
+            st.info("Need category_code, should_collect, and status columns")
     
     st.markdown("---")
     
