@@ -226,35 +226,47 @@ def build_single_page_dashboard(df, calc_df):
             # Step 2: Filter to top categories
             df_top = df[df['category_code'].isin(top_categories)].copy()
             
-            # Step 3: Translate status FIRST
-            status_translation = {
-                'ครบ': 'MATCH', 'MATCH': 'MATCH',
-                'ขาด': 'UNDER', 'UNDER': 'UNDER',
-                'เกิน': 'OVER', 'OVER': 'OVER'
+            # Step 3: Clean and translate status
+            # Remove ALL possible icons first
+            df_top['status_clean'] = df_top['status'].astype(str).str.replace('⚠️', '', regex=False)
+            df_top['status_clean'] = df_top['status_clean'].str.replace('⚠', '', regex=False)
+            df_top['status_clean'] = df_top['status_clean'].str.replace('✅', '', regex=False)
+            df_top['status_clean'] = df_top['status_clean'].str.replace('✓', '', regex=False)
+            df_top['status_clean'] = df_top['status_clean'].str.replace('❌', '', regex=False)
+            df_top['status_clean'] = df_top['status_clean'].str.replace('✗', '', regex=False)
+            df_top['status_clean'] = df_top['status_clean'].str.strip()
+            
+            # Then translate
+            status_map = {
+                'เกิน': 'OVER',
+                'ครบ': 'MATCH',
+                'ขาด': 'UNDER',
+                'OVER': 'OVER',
+                'MATCH': 'MATCH',
+                'UNDER': 'UNDER'
             }
-            df_top['status_en'] = df_top['status'].map(lambda x: status_translation.get(x, x))
+            df_top['status_en'] = df_top['status_clean'].map(status_map)
             
-            # REMOVE icons if present
-            df_top['status_en'] = df_top['status_en'].str.replace('⚠️', '').str.replace('✅', '').str.replace('❌', '').str.strip()
-            
-            # Step 4: Group by category and status_en (NOT status!)
+            # Step 4: Group using status_en
             grouped = df_top.groupby(['category_code', 'status_en'])['should_collect'].sum().reset_index()
             
             if len(grouped) > 0:
-                # Step 5: Pivot using status_en
+                # Step 5: Pivot
                 pivot = grouped.pivot(
                     index='category_code',
                     columns='status_en',
                     values='should_collect'
                 ).fillna(0)
                 
-                if len(pivot) > 0:
+                if len(pivot) > 0 and len(pivot.columns) > 0:
                     # Step 6: Reorder
                     pivot = pivot.reindex(top_categories)
                     pivot = pivot.iloc[::-1]
                     
                     # Step 7: Calculate percentages
                     pivot['total'] = pivot.sum(axis=1)
+                    
+                    # Only calculate for columns that exist
                     for col in ['MATCH', 'UNDER', 'OVER']:
                         if col in pivot.columns:
                             pivot[f'{col}_pct'] = (pivot[col] / pivot['total'] * 100).fillna(0)
@@ -262,7 +274,8 @@ def build_single_page_dashboard(df, calc_df):
                     # Step 8: Create chart
                     fig = go.Figure()
                     
-                    if 'MATCH_pct' in pivot.columns:
+                    # Add traces only if column exists
+                    if 'MATCH' in pivot.columns and 'MATCH_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
                             name='MATCH',
                             y=pivot.index.tolist(),
@@ -274,7 +287,7 @@ def build_single_page_dashboard(df, calc_df):
                             textfont=dict(color='black', size=11)
                         ))
                     
-                    if 'UNDER_pct' in pivot.columns:
+                    if 'UNDER' in pivot.columns and 'UNDER_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
                             name='UNDER',
                             y=pivot.index.tolist(),
@@ -286,7 +299,7 @@ def build_single_page_dashboard(df, calc_df):
                             textfont=dict(color='black', size=11)
                         ))
                     
-                    if 'OVER_pct' in pivot.columns:
+                    if 'OVER' in pivot.columns and 'OVER_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
                             name='OVER',
                             y=pivot.index.tolist(),
@@ -311,9 +324,11 @@ def build_single_page_dashboard(df, calc_df):
                     
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.error("❌ Pivot is empty")
+                    st.error("❌ Pivot has no columns or rows")
+                    st.write("Pivot columns:", pivot.columns.tolist() if len(pivot) > 0 else "empty")
             else:
-                st.error("❌ Grouped data is empty")
+                st.error("❌ No grouped data")
+                st.write("Unique status_en:", df_top['status_en'].unique())
         else:
             st.info("Need category_code, should_collect, and status columns")
     
