@@ -155,19 +155,31 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Status Distribution**")
         if 'status' in df.columns and 'should_collect' in df.columns:
-            # Group first BEFORE translation
-            status_amounts = df.groupby('status')['should_collect'].sum()
+            # Create working copy
+            df_status = df.copy()
             
-            # Then translate index
+            # Remove ALL icons first
+            df_status['status_clean'] = df_status['status'].astype(str).str.replace('⚠️', '', regex=False)
+            df_status['status_clean'] = df_status['status_clean'].str.replace('⚠', '', regex=False)
+            df_status['status_clean'] = df_status['status_clean'].str.replace('✅', '', regex=False)
+            df_status['status_clean'] = df_status['status_clean'].str.replace('✓', '', regex=False)
+            df_status['status_clean'] = df_status['status_clean'].str.replace('❌', '', regex=False)
+            df_status['status_clean'] = df_status['status_clean'].str.replace('✗', '', regex=False)
+            df_status['status_clean'] = df_status['status_clean'].str.strip()
+            
+            # Then translate to English
             status_translation = {
-                'ครบ': 'MATCH',
-                'ขาด': 'UNDER', 
                 'เกิน': 'OVER',
+                'ครบ': 'MATCH',
+                'ขาด': 'UNDER',
+                'OVER': 'OVER',
                 'MATCH': 'MATCH',
-                'UNDER': 'UNDER',
-                'OVER': 'OVER'
+                'UNDER': 'UNDER'
             }
-            status_amounts.index = status_amounts.index.map(lambda x: status_translation.get(x, x))
+            df_status['status_en'] = df_status['status_clean'].map(status_translation)
+            
+            # Group by translated status
+            status_amounts = df_status.groupby('status_en')['should_collect'].sum()
             
             # Reindex to ensure order
             status_order = ['MATCH', 'UNDER', 'OVER']
