@@ -178,28 +178,28 @@ def build_single_page_dashboard(df, calc_df):
             }
             df_status['status_en'] = df_status['status_clean'].map(status_translation)
             
-            # Group by translated status
-            status_amounts = df_status.groupby('status_en')['should_collect'].sum()
+            # COUNT records by status (not sum amount!)
+            status_counts = df_status['status_en'].value_counts()
             
             # Reindex to ensure order
             status_order = ['MATCH', 'UNDER', 'OVER']
-            status_amounts = status_amounts.reindex(status_order, fill_value=0)
+            status_counts = status_counts.reindex(status_order, fill_value=0)
             
             # Color mapping
             color_map = {'MATCH': '#FFD700', 'UNDER': '#90EE90', 'OVER': '#FF6B6B'}
-            colors = [color_map[s] for s in status_amounts.index]
+            colors = [color_map[s] for s in status_counts.index]
             
             fig = go.Figure(data=[go.Bar(
-                x=status_amounts.index,
-                y=status_amounts.values,
+                x=status_counts.index,
+                y=status_counts.values,
                 marker_color=colors,
-                text=[f"฿{x:,.0f}" for x in status_amounts.values],
+                text=[f"{x:,} records" for x in status_counts.values],
                 textposition='outside'
             )])
             
             fig.update_layout(
                 xaxis_title="Status",
-                yaxis_title="Amount (฿)",
+                yaxis_title="Number of Records",
                 height=350,
                 showlegend=False,
                 margin=dict(l=50, r=50, t=30, b=50)
