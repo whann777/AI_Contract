@@ -218,10 +218,7 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Diverging Stacked Bar by Category**")
         if 'category_code' in df.columns and 'difference' in df.columns and 'status' in df.columns:
-            # Group by category and status FIRST
-            cat_status = df.groupby(['category_code', 'status'])['difference'].sum().reset_index()
-            
-            # Then translate status
+            # Translate status to English
             status_translation = {
                 'ครบ': 'MATCH',
                 'ขาด': 'UNDER', 
@@ -230,84 +227,86 @@ def build_single_page_dashboard(df, calc_df):
                 'UNDER': 'UNDER',
                 'OVER': 'OVER'
             }
-            cat_status['status'] = cat_status['status'].map(lambda x: status_translation.get(x, x))
             
-            if len(cat_status) > 0:
-                # Pivot
-                pivot = cat_status.pivot_table(
-                    index='category_code',
-                    columns='status',
-                    values='difference',
-                    fill_value=0,
-                    aggfunc='sum'
+            # Create working copy
+            df_diverging = df.copy()
+            df_diverging['status_en'] = df_diverging['status'].map(lambda x: status_translation.get(x, x))
+            
+            # Group by category and status
+            grouped = df_diverging.groupby(['category_code', 'status_en'])['difference'].sum().reset_index()
+            
+            # Get top 10 categories by total absolute difference
+            total_by_cat = df_diverging.groupby('category_code')['difference'].apply(lambda x: abs(x).sum()).sort_values(ascending=False).head(10)
+            top_categories = total_by_cat.index.tolist()
+            
+            # Filter to top categories
+            grouped = grouped[grouped['category_code'].isin(top_categories)]
+            
+            if len(grouped) > 0:
+                # Pivot to get UNDER, MATCH, OVER columns
+                pivot = grouped.pivot(index='category_code', columns='status_en', values='difference').fillna(0)
+                
+                # Reorder by total (to match top_categories order)
+                pivot = pivot.reindex(top_categories)
+                
+                # Create figure
+                fig = go.Figure()
+                
+                # Add UNDER (left - green)
+                if 'UNDER' in pivot.columns:
+                    fig.add_trace(go.Bar(
+                        name='UNDER (ขาด)',
+                        y=pivot.index,
+                        x=pivot['UNDER'],
+                        orientation='h',
+                        marker=dict(color='#90EE90'),
+                        text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['UNDER']],
+                        textposition='inside',
+                        textfont=dict(color='black', size=10)
+                    ))
+                
+                # Add MATCH (center - yellow)
+                if 'MATCH' in pivot.columns:
+                    fig.add_trace(go.Bar(
+                        name='MATCH (ครบ)',
+                        y=pivot.index,
+                        x=pivot['MATCH'],
+                        orientation='h',
+                        marker=dict(color='#FFD700'),
+                        text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['MATCH']],
+                        textposition='inside',
+                        textfont=dict(color='black', size=10)
+                    ))
+                
+                # Add OVER (right - red)
+                if 'OVER' in pivot.columns:
+                    fig.add_trace(go.Bar(
+                        name='OVER (เกิน)',
+                        y=pivot.index,
+                        x=pivot['OVER'],
+                        orientation='h',
+                        marker=dict(color='#FF6B6B'),
+                        text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['OVER']],
+                        textposition='inside',
+                        textfont=dict(color='white', size=10)
+                    ))
+                
+                fig.update_layout(
+                    barmode='relative',  # Stack from center (diverging)
+                    xaxis_title="Amount (฿)",
+                    yaxis_title="Category",
+                    height=350,
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    margin=dict(l=100, r=50, t=50, b=50)
                 )
                 
-                # Sort and take top 10
-                if len(pivot) > 0:
-                    pivot['total_abs'] = pivot.abs().sum(axis=1)
-                    pivot = pivot.sort_values('total_abs', ascending=True)
-                    pivot = pivot.tail(10).drop('total_abs', axis=1)
-                    
-                    # Create figure
-                    fig = go.Figure()
-                    
-                    # UNDER (left - green)
-                    if 'UNDER' in pivot.columns:
-                        fig.add_trace(go.Bar(
-                            name='UNDER',
-                            y=pivot.index,
-                            x=pivot['UNDER'],
-                            orientation='h',
-                            marker=dict(color='#90EE90'),
-                            text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['UNDER']],
-                            textposition='inside',
-                            textfont=dict(color='black', size=10)
-                        ))
-                    
-                    # MATCH (center - yellow)
-                    if 'MATCH' in pivot.columns:
-                        fig.add_trace(go.Bar(
-                            name='MATCH',
-                            y=pivot.index,
-                            x=pivot['MATCH'],
-                            orientation='h',
-                            marker=dict(color='#FFD700'),
-                            text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['MATCH']],
-                            textposition='inside',
-                            textfont=dict(color='black', size=10)
-                        ))
-                    
-                    # OVER (right - red)
-                    if 'OVER' in pivot.columns:
-                        fig.add_trace(go.Bar(
-                            name='OVER',
-                            y=pivot.index,
-                            x=pivot['OVER'],
-                            orientation='h',
-                            marker=dict(color='#FF6B6B'),
-                            text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['OVER']],
-                            textposition='inside',
-                            textfont=dict(color='white', size=10)
-                        ))
-                    
-                    fig.update_layout(
-                        barmode='relative',
-                        xaxis_title="Amount (฿)",
-                        yaxis_title="Category",
-                        height=350,
-                        showlegend=True,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                        margin=dict(l=100, r=50, t=50, b=50)
-                    )
-                    
-                    # Center line
-                    fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="white", opacity=0.5)
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No data after pivot")
+                # Add center line at x=0
+                fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="white", opacity=0.5)
+                
+                st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("No data available - run analysis first")
+                st.info("No data available")
         else:
             st.info("Need category_code, difference, and status columns")
     
