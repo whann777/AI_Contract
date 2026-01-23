@@ -157,23 +157,39 @@ def build_single_page_dashboard(df, calc_df):
         if 'status' in df.columns and 'should_collect' in df.columns:
             status_amounts = df.groupby('status')['should_collect'].sum()
             
-            # FIX: Color mapping (MATCH=Yellow, UNDER=Green, OVER=Red) - NO ICONS
+            # Ensure status is in ENGLISH (MATCH, UNDER, OVER)
+            # Map Thai to English if needed
+            status_translation = {
+                'ครบ': 'MATCH',
+                'ขาด': 'UNDER', 
+                'เกิน': 'OVER'
+            }
+            
+            # Translate status to English
+            status_amounts.index = status_amounts.index.map(lambda x: status_translation.get(x, x))
+            
+            # Color mapping (MATCH=Yellow, UNDER=Green, OVER=Red)
             color_map = {'MATCH': '#FFD700', 'UNDER': '#90EE90', 'OVER': '#FF6B6B'}
             colors = [color_map.get(s, '#CCCCCC') for s in status_amounts.index]
             
             fig = go.Figure(data=[go.Bar(
-                x=status_amounts.index,  # Status on X-axis (English ONLY)
+                x=status_amounts.index,  # MATCH, UNDER, OVER (English only, no icons)
                 y=status_amounts.values,
                 marker_color=colors,
                 text=[f"฿{x:,.0f}" for x in status_amounts.values],
                 textposition='outside'
             )])
             fig.update_layout(
-                xaxis_title="Status",  # English label
+                xaxis_title="Status",
                 yaxis_title="Amount (฿)",
                 height=350,
                 showlegend=False,
-                margin=dict(l=50, r=50, t=30, b=50)
+                margin=dict(l=50, r=50, t=30, b=50),
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=['MATCH', 'UNDER', 'OVER'],
+                    ticktext=['MATCH', 'UNDER', 'OVER']  # Force English text only
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
     
@@ -200,72 +216,89 @@ def build_single_page_dashboard(df, calc_df):
     
     with col2:
         st.markdown("**Diverging Stacked Bar by Category**")
-        if 'category_code' in df.columns and 'difference' in df.columns:
+        if 'category_code' in df.columns and 'difference' in df.columns and 'status' in df.columns:
             # Group by category and status
             cat_status = df.groupby(['category_code', 'status'])['difference'].sum().reset_index()
+            
+            # Translate status to English if needed
+            status_translation = {'ครบ': 'MATCH', 'ขาด': 'UNDER', 'เกิน': 'OVER'}
+            cat_status['status'] = cat_status['status'].map(lambda x: status_translation.get(x, x))
             
             # Pivot to get UNDER (left), MATCH (center), OVER (right)
             pivot = cat_status.pivot(index='category_code', columns='status', values='difference').fillna(0)
             
-            # Sort by total absolute difference
-            pivot['total_abs'] = pivot.abs().sum(axis=1)
-            pivot = pivot.sort_values('total_abs', ascending=True).drop('total_abs', axis=1)
-            
-            # Create diverging chart
-            fig = go.Figure()
-            
-            # UNDER (negative - left side) - Green
-            if 'UNDER' in pivot.columns:
-                fig.add_trace(go.Bar(
-                    y=pivot.index,
-                    x=pivot['UNDER'],  # Already negative
-                    name='UNDER',
-                    orientation='h',
-                    marker=dict(color='#90EE90'),
-                    text=[f"฿{abs(x):,.0f}" if x != 0 else "" for x in pivot['UNDER']],
-                    textposition='inside'
-                ))
-            
-            # MATCH (center) - Yellow
-            if 'MATCH' in pivot.columns:
-                fig.add_trace(go.Bar(
-                    y=pivot.index,
-                    x=pivot['MATCH'],
-                    name='MATCH',
-                    orientation='h',
-                    marker=dict(color='#FFD700'),
-                    text=[f"฿{x:,.0f}" if x != 0 else "" for x in pivot['MATCH']],
-                    textposition='inside'
-                ))
-            
-            # OVER (positive - right side) - Red
-            if 'OVER' in pivot.columns:
-                fig.add_trace(go.Bar(
-                    y=pivot.index,
-                    x=pivot['OVER'],  # Already positive
-                    name='OVER',
-                    orientation='h',
-                    marker=dict(color='#FF6B6B'),
-                    text=[f"฿{x:,.0f}" if x != 0 else "" for x in pivot['OVER']],
-                    textposition='inside'
-                ))
-            
-            fig.update_layout(
-                barmode='relative',  # Stack from center
-                xaxis_title="Amount (฿)",
-                yaxis_title="",
-                height=350,
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=80, r=50, t=50, b=50)
-            )
-            
-            # Add vertical line at x=0
-            fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="gray")
-            
-            st.plotly_chart(fig, use_container_width=True)
+            # Ensure we have data
+            if len(pivot) > 0:
+                # Sort by total absolute difference
+                pivot['total_abs'] = pivot.abs().sum(axis=1)
+                pivot = pivot.sort_values('total_abs', ascending=True).drop('total_abs', axis=1)
+                
+                # Take top 10 categories
+                pivot = pivot.tail(10)
+                
+                # Create diverging chart
+                fig = go.Figure()
+                
+                # UNDER (negative - left side) - Green
+                if 'UNDER' in pivot.columns:
+                    under_values = pivot['UNDER'].values
+                    fig.add_trace(go.Bar(
+                        name='UNDER',
+                        y=pivot.index,  # Y = Category
+                        x=under_values,  # X = Amount (negative)
+                        orientation='h',
+                        marker=dict(color='#90EE90'),
+                        text=[f"฿{abs(x):,.0f}" if x != 0 else "" for x in under_values],
+                        textposition='inside',
+                        hovertemplate='<b>%{y}</b><br>UNDER: ฿%{x:,.0f}<extra></extra>'
+                    ))
+                
+                # MATCH (center) - Yellow  
+                if 'MATCH' in pivot.columns:
+                    match_values = pivot['MATCH'].values
+                    fig.add_trace(go.Bar(
+                        name='MATCH',
+                        y=pivot.index,
+                        x=match_values,
+                        orientation='h',
+                        marker=dict(color='#FFD700'),
+                        text=[f"฿{abs(x):,.0f}" if abs(x) > 100 else "" for x in match_values],
+                        textposition='inside',
+                        hovertemplate='<b>%{y}</b><br>MATCH: ฿%{x:,.0f}<extra></extra>'
+                    ))
+                
+                # OVER (positive - right side) - Red
+                if 'OVER' in pivot.columns:
+                    over_values = pivot['OVER'].values
+                    fig.add_trace(go.Bar(
+                        name='OVER',
+                        y=pivot.index,
+                        x=over_values,  # X = Amount (positive)
+                        orientation='h',
+                        marker=dict(color='#FF6B6B'),
+                        text=[f"฿{abs(x):,.0f}" if x != 0 else "" for x in over_values],
+                        textposition='inside',
+                        hovertemplate='<b>%{y}</b><br>OVER: ฿%{x:,.0f}<extra></extra>'
+                    ))
+                
+                fig.update_layout(
+                    barmode='relative',  # Stack from center
+                    xaxis_title="Amount (฿)",  # X = Amount
+                    yaxis_title="Category",  # Y = Category
+                    height=350,
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    margin=dict(l=100, r=50, t=50, b=50)
+                )
+                
+                # Add vertical line at x=0
+                fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="white", opacity=0.5)
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No data available for diverging chart")
         else:
-            st.info("Run analysis to see breakdown")
+            st.info("Need category and difference data for diverging chart")
     
     st.markdown("---")
     
