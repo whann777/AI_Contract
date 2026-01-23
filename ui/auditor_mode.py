@@ -313,43 +313,6 @@ def build_single_page_dashboard(df, calc_df):
     
     st.markdown("---")
     
-    # ========== ACTION SECTION ==========
-    
-    # Priority Settings
-    col1, col2, col3 = st.columns([1, 1, 2])
-    with col1:
-        high_threshold = st.number_input("HIGH (฿)", value=10000, step=1000)
-    with col2:
-        med_threshold = st.number_input("MED (฿)", value=5000, step=1000)
-    
-    # Calculate Priority
-    df_action = df.copy()
-    if 'difference' in df_action.columns:
-        df_action['abs_diff'] = abs(df_action['difference'])
-        
-        def get_priority(diff):
-            abs_diff = abs(diff)
-            if abs_diff >= high_threshold:
-                return 'HIGH'
-            elif abs_diff >= med_threshold:
-                return 'MEDIUM'
-            else:
-                return 'LOW'
-        
-        df_action['priority'] = df_action['difference'].apply(get_priority)
-        
-        # Priority counts
-        high_count = len(df_action[df_action['priority'] == 'HIGH'])
-        med_count = len(df_action[df_action['priority'] == 'MEDIUM'])
-        low_count = len(df_action[df_action['priority'] == 'LOW'])
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("HIGH", high_count, delta="Urgent", delta_color="inverse")
-        col2.metric("MEDIUM", med_count)
-        col3.metric("LOW", low_count)
-    
-    st.markdown("---")
-    
     # Summary by Vendor (sorted by leakage)
     st.markdown("**Summary by Vendor**")
     
