@@ -218,46 +218,58 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Diverging Stacked Bar by Category**")
         if 'category_code' in df.columns and 'difference' in df.columns and 'status' in df.columns:
-            # Translate status to English
+            # DEBUG: แสดงข้อมูลตัวอย่าง
+            with st.expander("🔍 Debug Data", expanded=False):
+                st.write("**Sample data:**")
+                st.dataframe(df[['category_code', 'status', 'difference']].head(10))
+                st.write(f"**Unique statuses:** {df['status'].unique()}")
+                st.write(f"**Total records:** {len(df)}")
+            
+            # Translate status
             status_translation = {
-                'ครบ': 'MATCH',
-                'ขาด': 'UNDER', 
-                'เกิน': 'OVER',
-                'MATCH': 'MATCH',
-                'UNDER': 'UNDER',
-                'OVER': 'OVER'
+                'ครบ': 'MATCH', 'MATCH': 'MATCH',
+                'ขาด': 'UNDER', 'UNDER': 'UNDER',
+                'เกิน': 'OVER', 'OVER': 'OVER'
             }
             
-            # Create working copy
-            df_diverging = df.copy()
-            df_diverging['status_en'] = df_diverging['status'].map(lambda x: status_translation.get(x, x))
+            # Create working dataframe
+            df_work = df[['category_code', 'status', 'difference']].copy()
+            df_work['status_en'] = df_work['status'].map(lambda x: status_translation.get(x, x))
             
-            # Group by category and status
-            grouped = df_diverging.groupby(['category_code', 'status_en'])['difference'].sum().reset_index()
+            # Group by category and status - SUM the differences
+            grouped = df_work.groupby(['category_code', 'status_en'], as_index=False)['difference'].sum()
             
-            # Get top 10 categories by total absolute difference
-            total_by_cat = df_diverging.groupby('category_code')['difference'].apply(lambda x: abs(x).sum()).sort_values(ascending=False).head(10)
-            top_categories = total_by_cat.index.tolist()
-            
-            # Filter to top categories
-            grouped = grouped[grouped['category_code'].isin(top_categories)]
+            # DEBUG
+            st.write("**Grouped data:**", grouped)
             
             if len(grouped) > 0:
-                # Pivot to get UNDER, MATCH, OVER columns
-                pivot = grouped.pivot(index='category_code', columns='status_en', values='difference').fillna(0)
+                # Pivot: rows=category, columns=status, values=difference
+                pivot = grouped.pivot(
+                    index='category_code',
+                    columns='status_en',
+                    values='difference'
+                ).fillna(0)
                 
-                # Reorder by total (to match top_categories order)
-                pivot = pivot.reindex(top_categories)
+                # DEBUG
+                st.write("**Pivot table:**", pivot)
                 
-                # Create figure
+                # Get top 10 by absolute total
+                pivot['abs_total'] = pivot.abs().sum(axis=1)
+                pivot = pivot.sort_values('abs_total', ascending=False).head(10)
+                pivot = pivot.drop('abs_total', axis=1)
+                
+                # Sort for display (largest to smallest)
+                pivot = pivot.iloc[::-1]
+                
+                # Create chart
                 fig = go.Figure()
                 
-                # Add UNDER (left - green)
+                # UNDER (left - green)
                 if 'UNDER' in pivot.columns:
                     fig.add_trace(go.Bar(
                         name='UNDER (ขาด)',
-                        y=pivot.index,
-                        x=pivot['UNDER'],
+                        y=pivot.index.tolist(),  # Convert to list
+                        x=pivot['UNDER'].tolist(),
                         orientation='h',
                         marker=dict(color='#90EE90'),
                         text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['UNDER']],
@@ -265,12 +277,12 @@ def build_single_page_dashboard(df, calc_df):
                         textfont=dict(color='black', size=10)
                     ))
                 
-                # Add MATCH (center - yellow)
+                # MATCH (center - yellow)
                 if 'MATCH' in pivot.columns:
                     fig.add_trace(go.Bar(
                         name='MATCH (ครบ)',
-                        y=pivot.index,
-                        x=pivot['MATCH'],
+                        y=pivot.index.tolist(),
+                        x=pivot['MATCH'].tolist(),
                         orientation='h',
                         marker=dict(color='#FFD700'),
                         text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['MATCH']],
@@ -278,12 +290,12 @@ def build_single_page_dashboard(df, calc_df):
                         textfont=dict(color='black', size=10)
                     ))
                 
-                # Add OVER (right - red)
+                # OVER (right - red)
                 if 'OVER' in pivot.columns:
                     fig.add_trace(go.Bar(
                         name='OVER (เกิน)',
-                        y=pivot.index,
-                        x=pivot['OVER'],
+                        y=pivot.index.tolist(),
+                        x=pivot['OVER'].tolist(),
                         orientation='h',
                         marker=dict(color='#FF6B6B'),
                         text=[f"฿{abs(x):,.0f}" if abs(x) > 1000 else "" for x in pivot['OVER']],
@@ -292,7 +304,7 @@ def build_single_page_dashboard(df, calc_df):
                     ))
                 
                 fig.update_layout(
-                    barmode='relative',  # Stack from center (diverging)
+                    barmode='relative',
                     xaxis_title="Amount (฿)",
                     yaxis_title="Category",
                     height=350,
@@ -301,12 +313,12 @@ def build_single_page_dashboard(df, calc_df):
                     margin=dict(l=100, r=50, t=50, b=50)
                 )
                 
-                # Add center line at x=0
+                # Center line
                 fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="white", opacity=0.5)
                 
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("No data available")
+                st.error("❌ No grouped data - check if status column has valid values")
         else:
             st.info("Need category_code, difference, and status columns")
     
