@@ -199,17 +199,28 @@ def build_single_page_dashboard(df, calc_df):
     # ========== Charts Row 2 ==========
     col1, col2 = st.columns(2)
     
+    # Get top 10 categories FIRST (shared by both charts)
+    if 'category_code' in df.columns and 'should_collect' in df.columns:
+        cat_summary = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False).head(10)
+        top_categories = cat_summary.index.tolist()
+        top_categories_reversed = top_categories[::-1]  # Reverse for bottom-to-top display
+    else:
+        top_categories = []
+        top_categories_reversed = []
+    
     with col1:
         st.markdown("**Category Breakdown**")
-        if 'category_code' in df.columns and 'should_collect' in df.columns:
-            cat_summary = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False).head(10)
+        if len(top_categories) > 0:
+            # Use the same order as completion ratio chart
+            cat_display = cat_summary.reindex(top_categories)
+            cat_display = cat_display.iloc[::-1]  # Reverse for display
             
             fig = px.bar(
-                x=cat_summary.values,
-                y=cat_summary.index,
+                x=cat_display.values,
+                y=cat_display.index,
                 orientation='h',
                 labels={'x': 'Amount (฿)', 'y': ''},
-                color=cat_summary.values,
+                color=cat_display.values,
                 color_continuous_scale='Viridis'
             )
             fig.update_layout(height=350, showlegend=False, margin=dict(l=80, r=50, t=30, b=50))
@@ -218,16 +229,11 @@ def build_single_page_dashboard(df, calc_df):
     with col2:
         st.markdown("**Completion Ratio by Category**")
         
-        if 'category_code' in df.columns and 'should_collect' in df.columns and 'status' in df.columns:
-            # Step 1: Get top 10 categories
-            cat_summary = df.groupby('category_code')['should_collect'].sum().sort_values(ascending=False).head(10)
-            top_categories = cat_summary.index.tolist()
-            
-            # Step 2: Filter to top categories
+        if len(top_categories) > 0 and 'status' in df.columns:
+            # Filter to top categories (same as Category Breakdown)
             df_top = df[df['category_code'].isin(top_categories)].copy()
             
-            # Step 3: Clean and translate status
-            # Remove ALL possible icons first
+            # Clean and translate status
             df_top['status_clean'] = df_top['status'].astype(str).str.replace('⚠️', '', regex=False)
             df_top['status_clean'] = df_top['status_clean'].str.replace('⚠', '', regex=False)
             df_top['status_clean'] = df_top['status_clean'].str.replace('✅', '', regex=False)
@@ -236,7 +242,6 @@ def build_single_page_dashboard(df, calc_df):
             df_top['status_clean'] = df_top['status_clean'].str.replace('✗', '', regex=False)
             df_top['status_clean'] = df_top['status_clean'].str.strip()
             
-            # Then translate
             status_map = {
                 'เกิน': 'OVER',
                 'ครบ': 'MATCH',
@@ -247,11 +252,11 @@ def build_single_page_dashboard(df, calc_df):
             }
             df_top['status_en'] = df_top['status_clean'].map(status_map)
             
-            # Step 4: Group using status_en
+            # Group using status_en
             grouped = df_top.groupby(['category_code', 'status_en'])['should_collect'].sum().reset_index()
             
             if len(grouped) > 0:
-                # Step 5: Pivot
+                # Pivot
                 pivot = grouped.pivot(
                     index='category_code',
                     columns='status_en',
@@ -259,22 +264,20 @@ def build_single_page_dashboard(df, calc_df):
                 ).fillna(0)
                 
                 if len(pivot) > 0 and len(pivot.columns) > 0:
-                    # Step 6: Reorder
+                    # Use SAME order as Category Breakdown
                     pivot = pivot.reindex(top_categories)
-                    pivot = pivot.iloc[::-1]
+                    pivot = pivot.iloc[::-1]  # Reverse for bottom-to-top display
                     
-                    # Step 7: Calculate percentages
+                    # Calculate percentages
                     pivot['total'] = pivot.sum(axis=1)
                     
-                    # Only calculate for columns that exist
                     for col in ['MATCH', 'UNDER', 'OVER']:
                         if col in pivot.columns:
                             pivot[f'{col}_pct'] = (pivot[col] / pivot['total'] * 100).fillna(0)
                     
-                    # Step 8: Create chart
+                    # Create chart
                     fig = go.Figure()
                     
-                    # Add traces only if column exists
                     if 'MATCH' in pivot.columns and 'MATCH_pct' in pivot.columns:
                         fig.add_trace(go.Bar(
                             name='MATCH',
@@ -324,11 +327,9 @@ def build_single_page_dashboard(df, calc_df):
                     
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.error("❌ Pivot has no columns or rows")
-                    st.write("Pivot columns:", pivot.columns.tolist() if len(pivot) > 0 else "empty")
+                    st.info("No data for completion ratio")
             else:
-                st.error("❌ No grouped data")
-                st.write("Unique status_en:", df_top['status_en'].unique())
+                st.info("No grouped data")
         else:
             st.info("Need category_code, should_collect, and status columns")
     
